@@ -17,11 +17,11 @@
 *    - O(1) time complexity of page remove
 * 
 *  CachedFileIO vs STDIO performance tests (Release Mode):
-*    - 50%-97% cache read hits leads to 50%-600% performance growth
+*    - 50%-97% cache read hits leads to 50%-200% performance growth
 *    - 35%-49% cache read hits leads to 12%-36% performance growth
 *    - 1%-25%  cache read hits leads to 5%-20% performance drop
 *
-*  (C) Cloudless, Bolat Basheyev 2022-2023
+*  (C) Cloudless, Bolat Basheyev 2022-2024
 *
 ******************************************************************************/
 

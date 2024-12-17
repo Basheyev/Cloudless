@@ -21,7 +21,7 @@
 *    - 35%-49% cache read hits leads to 12%-36% performance growth
 *    - 1%-25%  cache read hits leads to 5%-20% performance drop
 *
-*  (C) Cloudless, Bolat Basheyev 2022-2023
+*  (C) Cloudless, Bolat Basheyev 2022-2024
 *
 ******************************************************************************/
 
