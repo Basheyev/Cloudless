@@ -136,8 +136,8 @@ namespace Cloudless {
 		uint64_t        totalWriteDuration;      // Time of write operations (ns)
 		uint64_t        cacheRequests;           // Cache requests counter
 		uint64_t        cacheMisses;             // Cache misses counter
-
-		std::fstream    fileHandler;             // file handler
+		    
+		std::filebuf    fileHandler;             // file handler
 		bool            readOnly;                // Read only flag
 		CachedPagesMap  cacheMap;                // Cached pages map 
 		CacheLinkedList cacheList;               // Cached pages double linked list

@@ -85,9 +85,7 @@ bool CachedFileIO::open(const char* path, size_t cacheSize, bool isReadOnly) {
 		if (!newFile.is_open()) return false;
 		newFile.close();
 	}
-
-	
-	
+		
 	// try to open existing file for binary read/update 
 	auto openMode = std::ios::in | std::ios::binary;
 	if (!isReadOnly) openMode |= std::ios::out;
@@ -96,7 +94,7 @@ bool CachedFileIO::open(const char* path, size_t cacheSize, bool isReadOnly) {
 	if (!this->fileHandler.is_open()) return false;		
 	
 	// set mode to no buffering, we will manage buffers and caching by our selves
-	this->fileHandler.rdbuf()->pubsetbuf(nullptr, 0);
+	this->fileHandler.pubsetbuf(nullptr, 0);
 	
 	// Allocated cache
 	if (setCacheSize(cacheSize) == NOT_FOUND) {
@@ -439,7 +437,7 @@ size_t CachedFileIO::flush() {
 	}
 	
 	// flush file buffers to storage device (is it relevant if we set buffers to none?)
-	fileHandler.flush();
+	fileHandler.pubsync();
 
 	// Time point B
 	auto endTime = std::chrono::high_resolution_clock::now();
@@ -526,10 +524,11 @@ double CachedFileIO::getStats(CachedFileStats type) {
 */
 size_t CachedFileIO::getFileSize() {
 	if (!fileHandler.is_open()) return 0;	
-	size_t currentPosition = fileHandler.tellg();
-	fileHandler.seekg(0, std::ios::end);
-	size_t fileSize = fileHandler.tellg();
-	fileHandler.seekg(currentPosition);
+	size_t currentPosition = fileHandler.pubseekoff(0, std::ios_base::cur, std::ios_base::in); //fileHandler.tellg();
+	//fileHandler.seekg(0, std::ios::end);	
+	size_t fileSize = fileHandler.pubseekoff(0, std::ios_base::end, std::ios_base::in); // fileHandler.pubseekoff(0, std::ios_base::cur, std::ios_base::in);
+	//fileHandler.seekg(currentPosition);
+	fileHandler.pubseekpos(currentPosition, std::ios_base::in);
 	return fileSize;
 }
 
@@ -709,8 +708,6 @@ CachePage* CachedFileIO::searchPageInCache(size_t filePageNo) {
 */
 CachePage* CachedFileIO::loadPageToCache(size_t filePageNo) {
 
-	//if (fileHandler == nullptr) return nullptr;
-
 	// get new allocated page or most aged one (remove it from the list)
 	CachePage* cachePage = getFreeCachePage();
 
@@ -723,11 +720,8 @@ CachePage* CachedFileIO::loadPageToCache(size_t filePageNo) {
 	memset(cachePage->data, 0, PAGE_SIZE);
 
 	// Fetch page from storage device
-	fileHandler.seekg(offset);
-	bytesRead = fileHandler.read((char*)cachePage->data, bytesToRead).gcount();
-	
-	// Clear fstream state if EOF reached
-	if (fileHandler.eof()) fileHandler.clear();
+	fileHandler.pubseekpos(offset, std::ios_base::in);
+	bytesRead = fileHandler.sgetn((char*)cachePage->data, bytesToRead);
 			
 	// fill loaded page description info
 	cachePage->filePageNo = filePageNo;
@@ -754,20 +748,16 @@ CachePage* CachedFileIO::loadPageToCache(size_t filePageNo) {
 */ 
 bool CachedFileIO::persistCachePage(CachePage* cachedPage) {
 
-	//if (fileHandler == nullptr) return false;
-
 	// Get file page number of cached page and calculate offset in the file
 	size_t offset = cachedPage->filePageNo * PAGE_SIZE;
 	size_t bytesToWrite = PAGE_SIZE;
 	size_t bytesWritten = 0;
 
 	// Go to calculated offset in the file
-	fileHandler.seekp(offset);
-	if (!fileHandler.good()) return false;	
+	fileHandler.pubseekpos(offset, std::ios_base::out);
 
 	// Write cached page to file
-	fileHandler.write((char*)cachedPage->data, bytesToWrite);
-	bytesWritten = fileHandler.fail() ? 0 : bytesToWrite;
+	bytesWritten = fileHandler.sputn((char*)cachedPage->data, bytesToWrite);
 
 	// Check success
 	if (bytesWritten == bytesToWrite) {

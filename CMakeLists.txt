@@ -11,6 +11,7 @@ endif()
 
 project ("Cloudless")
 
+
 # Добавьте источник в исполняемый файл этого проекта.
 add_executable (
     
@@ -39,9 +40,8 @@ target_include_directories(Cloudless
     PUBLIC ${CMAKE_SOURCE_DIR}/src/test
 )
 
-
+# Установка стандарта C++ 20
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET Cloudless PROPERTY CXX_STANDARD 20)
 endif()
 
-# TODO: Добавьте тесты и целевые объекты, если это необходимо.
