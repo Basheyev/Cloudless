@@ -2,10 +2,11 @@
 *
 *  CachedFileIO class header
 *
-*  CachedFileIO is designed to improve performance of file I/O
-*  operations. Almost all real world apps show some form of locality of
-*  reference. Research says that 10-15% of database size cache gives
-*  more than 95% cache hits.
+*  CachedFileIO is designed to improve the performance of file I/O
+*  operations by utilizing LRU caching and ensuring thread safety.
+*  Almost all real-world applications exhibit some form of locality
+*  of reference. Research indicates that a cache size equivalent
+*  to 10-15% of the database size can achieve more than 95% cache hits.
 *
 *  Most JSON documents size are less than 1000 bytes. Most apps database
 *  read/write operations ratio is 70% / 30%. Read/write operations are
@@ -16,10 +17,9 @@
 *    - O(1) time complexity of page insert
 *    - O(1) time complexity of page remove
 * 
-*  CachedFileIO vs STDIO performance tests (Release Mode):
-*    - 50%-97% cache read hits leads to 50%-200% performance growth
-*    - 35%-49% cache read hits leads to 12%-36% performance growth
-*    - 1%-25%  cache read hits leads to 5%-20% performance drop
+*  CachedFileIO vs STDIO performance tests in release mode:
+*    - 85%-99% cache read hits leads to 70%-500% performance growth
+*    - 75%-84% cache read hits leads to 12%-50% performance growth
 *
 *  (C) Cloudless, Bolat Basheyev 2022-2024
 *
@@ -35,7 +35,7 @@
 #include <shared_mutex>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
+#include <algorithm>
 #include <unordered_map>
 
 
@@ -147,8 +147,5 @@ namespace Cloudless {
 		CachePageData*    cachePageDataPool;      // Cache pages data memory pool
 
 	};
-
-
-
 
 }

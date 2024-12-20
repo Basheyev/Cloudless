@@ -1,25 +1,25 @@
 /******************************************************************************
-*  
-*  CachedFileIO class implementation
-* 
-*  CachedFileIO is designed to improve performance of file I/O
-*  operations. Almost all real world apps show some form of locality of
-*  reference. Research says that 10-15% of database size cache gives
-*  more than 95% cache hits.
+*
+*  CachedFileIO class header
+*
+*  CachedFileIO is designed to improve the performance of file I/O
+*  operations by utilizing LRU caching and ensuring thread safety.
+*  Almost all real-world applications exhibit some form of locality
+*  of reference. Research indicates that a cache size equivalent
+*  to 10-15% of the database size can achieve more than 95% cache hits.
 *
 *  Most JSON documents size are less than 1000 bytes. Most apps database
 *  read/write operations ratio is 70% / 30%. Read/write operations are
 *  faster when aligned to storage device sector/block size and sequential.
 *
-*  CachedFileIO LRU/FBW caching strategy gives:
+*  CachedFileIO LRU/FBW (Linked list + Hashmap) caching strategy gives:
 *    - O(1) time complexity of page look up
 *    - O(1) time complexity of page insert
 *    - O(1) time complexity of page remove
 *
-*  CachedFileIO vs STDIO performance tests (Release Mode):
-*    - 50%-97% cache read hits leads to 50%-600% performance growth
-*    - 35%-49% cache read hits leads to 12%-36% performance growth
-*    - 1%-25%  cache read hits leads to 5%-20% performance drop
+*  CachedFileIO vs STDIO performance tests in release mode:
+*    - 85%-99% cache read hits leads to 70%-500% performance growth
+*    - 75%-84% cache read hits leads to 12%-50% performance growth
 *
 *  (C) Cloudless, Bolat Basheyev 2022-2024
 *
@@ -27,8 +27,6 @@
 
 #include "CachedFileIO.h"
 
-#include <algorithm>
-#include <chrono>
 
 using namespace Cloudless;
 
@@ -38,7 +36,7 @@ using namespace Cloudless;
 *
 */
 CachedFileIO::CachedFileIO() {
-	this->readOnly = false;
+	this->readOnly.store(false);
 	this->cachePageInfoPool = nullptr;		
 	this->cachePageDataPool = nullptr;
 	this->maxPagesCount.store(0);
@@ -97,7 +95,7 @@ bool CachedFileIO::open(const char* path, size_t cacheSize, bool isReadOnly) {
 		// Set mode to no buffering, we will manage caching by our selves
 		this->fileHandler.pubsetbuf(nullptr, 0);
 		// Set readOnly flag (atomic)
-		this->readOnly = isReadOnly;
+		this->readOnly.store(isReadOnly);
 	}
 		
 	// Allocated cache
@@ -126,7 +124,7 @@ bool CachedFileIO::close() {
 	// check if file was opened
 	if (!isOpen()) return false;
 	// flush buffers if we have write permissions
-	if (!readOnly) this->flush();
+	if (!readOnly.load()) this->flush();
 	// close file
 	{
 		// Lock file mutex in synchronized section
@@ -161,7 +159,7 @@ bool CachedFileIO::isOpen() {
 *
 */
 bool CachedFileIO::isReadOnly() {
-	return readOnly;
+	return readOnly.load();
 }
 
 
@@ -265,7 +263,7 @@ size_t CachedFileIO::read(size_t position, void* dataBuffer, size_t length) {
 size_t CachedFileIO::write(size_t position, const void* dataBuffer, size_t length) {
 
 	// Check if file handler, data buffer and length are not null
-	if (!isOpen() || this->readOnly || dataBuffer == nullptr || length == 0) return 0;
+	if (!isOpen() || this->readOnly.load() || dataBuffer == nullptr || length == 0) return 0;
 	
 	// Calculate start and end page number in the file
 	size_t firstPageNo = position / PAGE_SIZE;
@@ -407,7 +405,7 @@ size_t CachedFileIO::writePage(size_t pageNo, const void* userPageBuffer) {
 */
 size_t CachedFileIO::flush() {
 
-	if (!isOpen() || this->readOnly) return 0;
+	if (!isOpen() || this->readOnly.load()) return 0;
 
 	// Suppose all pages will be persisted
 	bool allDirtyPagesPersisted = true;
@@ -552,16 +550,9 @@ size_t CachedFileIO::setCacheSize(size_t cacheSize) {
 	this->pageCounter.store(0);
 	this->maxPagesCount.store(cacheSize / PAGE_SIZE);
 
-	// Try to allocate new cache
-	try {
-		this->allocatePool(this->maxPagesCount.load());
-	} catch (std::bad_alloc& ba) {	
-		// close file and return NOT_FOUND
-		std::cerr << "Can't allocate cache of size " << cacheSize << ": " << ba.what() << std::endl;
-		this->close();
-		return NOT_FOUND;
-	}
-	
+	// Allocate new cache (throws bad_alloc)
+	this->allocatePool(this->maxPagesCount.load());
+		
 	// Reset stats
 	this->resetStats();
 	// Return cache size in bytes

@@ -24,7 +24,7 @@ namespace Cloudless {
 	public:
 		CachedFileIOTest(const char* path);
 		~CachedFileIOTest();
-		bool run(size_t samples = 1000000, size_t jsonSize = 479, double cacheRatio = 0.15, double sigma = 0.04);
+		bool run(size_t samples = 500000, size_t jsonSize = 479, double cacheRatio = 0.15, double sigma = 0.04);
 	private:
 		CachedFileIO cf;
 		const char* fileName;

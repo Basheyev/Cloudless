@@ -2,7 +2,7 @@
 *
 *  CachedFileIO class tests implementation
 *
-*  (C) Bolat Basheyev 2022
+*  (C) Bolat Basheyev 2022-2024
 *
 ******************************************************************************/
 
@@ -250,8 +250,8 @@ void CachedFileIOTest::cachedRandomReadsThread(uint64_t batchNo, uint64_t batchS
 
 	delete[] buf;
 	
-	std::lock_guard iolock(outputLock);
-	std::cout << "Thread batch #" << batchNo << " prcessed " << batchSize << " reads.\n";
+	//std::lock_guard iolock(outputLock);
+	//std::cout << "Thread batch #" << batchNo << " prcessed " << batchSize << " reads.\n";
 
 }
 
