@@ -55,7 +55,7 @@ bool RecordFileIOTest::generateData(const char* filename, size_t recordsCount) {
 
 	auto endTime = std::chrono::high_resolution_clock::now();
 	std::cout << "OK in " << (endTime - startTime).count() / 1000000000.0 << "s";
-	std::cout << " - " << cachedFile.getStats(CachedFileStats::WRITE_THROUGHPUT) << "Mb/s\n";
+	//std::cout << " - " << cachedFile.getStats(CachedFileStats::WRITE_THROUGHPUT) << "Mb/s\n";
 
 	return true;
 }
@@ -99,7 +99,7 @@ bool RecordFileIOTest::readAscending(const char* filename, bool verbose) {
 	delete[] buffer;	
 	std::cout << "TOTAL READ: " << counter << " records ";
 	std::cout << "in " << (endTime - startTime).count() / 1000000000.0 << "s";
-	std::cout << " - " << cachedFile.getStats(CachedFileStats::READ_THROUGHPUT) << "Mb/s";
+	//std::cout << " - " << cachedFile.getStats(CachedFileStats::READ_THROUGHPUT) << "Mb/s";
 	std::cout << " - [" << ((db.getTotalRecords() == counter) ? "OK]\n" : "FAILED!]\n");
 	return true;
 }
@@ -171,7 +171,7 @@ bool RecordFileIOTest::removeEvenRecords(const char* filename, bool verbose) {
 	auto endTime = std::chrono::high_resolution_clock::now();	
 	std::cout << "TOTAL DELETED: " << counter << " records ";
 	std::cout << "in " << (endTime - startTime).count() / 1000000000.0 << "s";
-	std::cout << " - " << cachedFile.getStats(CachedFileStats::WRITE_THROUGHPUT) << "Mb/s\n";
+	//std::cout << " - " << cachedFile.getStats(CachedFileStats::WRITE_THROUGHPUT) << "Mb/s\n";
 	return true;
 }
 
@@ -198,14 +198,14 @@ bool RecordFileIOTest::insertNewRecords(const char* filename, size_t recordsCoun
 	}
 	auto endTime = std::chrono::high_resolution_clock::now();
 	std::cout << "OK in " << (endTime - startTime).count() / 1000000000.0 << "s";
-	std::cout << " - " << cachedFile.getStats(CachedFileStats::WRITE_THROUGHPUT) << "Mb/s\n";
+	//std::cout << " - " << cachedFile.getStats(CachedFileStats::WRITE_THROUGHPUT) << "Mb/s\n";
 	return true;
 }
 
 
 void RecordFileIOTest::run(const char* filename) {
 	std::filesystem::remove(filename);
-	generateData(filename, 10);
+	generateData(filename, 1000);
 	readAscending(filename,true);
 	removeEvenRecords(filename,true);
 	readDescending(filename, true);

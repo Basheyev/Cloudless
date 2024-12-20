@@ -14,6 +14,7 @@
 #include <chrono>
 #include <thread>
 #include <filesystem>
+#include <mutex>
 
 #include "CachedFileIO.h"
 
@@ -31,14 +32,13 @@ namespace Cloudless {
 		size_t docSize;
 		double cacheRatio;
 		double sigma;
+		std::mutex outputLock;
 
-		double cachedRandomPageWrites();
 		double cachedRandomWrites();
 		double randNormal(double mean, double stddev);
 		double cachedRandomReads();
+		void cachedRandomReadsThread(uint64_t batchNo, uint64_t batchSize, uint64_t length);
 		double stdioRandomReads();
-		double cachedRandomPageReads();
-		double stdioRandomPageReads();
 	};
 
 }
