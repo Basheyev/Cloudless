@@ -100,14 +100,14 @@ namespace Cloudless {
 		void operator=(const CachedFileIO&) = delete;
 		~CachedFileIO();
 		
-		bool open(const char* path, size_t cache = DEFAULT_CACHE, bool readOnly = false);
+		bool open(const char* path, bool readOnly = false, size_t cache = DEFAULT_CACHE);
 		bool close();
 		bool isOpen();
 		bool isReadOnly();
 
 		size_t read(size_t position, void* dataBuffer, size_t length);
 		size_t write(size_t position, const void* dataBuffer, size_t length);
-		size_t flush();
+		bool flush();
 
 		void   resetStats();
 		double getStats(CachedFileStats type);

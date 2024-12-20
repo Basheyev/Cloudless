@@ -66,9 +66,9 @@ CachedFileIO::~CachedFileIO() {
 *  @return true if file opened, false if can't open file
 *
 */
-bool CachedFileIO::open(const char* path, size_t cacheSize, bool isReadOnly) {
+bool CachedFileIO::open(const char* path, bool isReadOnly, size_t cacheSize) {
 	
-	// Return if null pointer
+	// Return if path not specified
 	if (path == nullptr) return false;
 
 	// if current file still open, close it
@@ -403,7 +403,7 @@ size_t CachedFileIO::writePage(size_t pageNo, const void* userPageBuffer) {
 *  @return true if all changed cache pages been persisted, false otherwise
 * 
 */
-size_t CachedFileIO::flush() {
+bool CachedFileIO::flush() {
 
 	if (!isOpen() || this->readOnly.load()) return 0;
 

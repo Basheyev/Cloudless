@@ -34,8 +34,11 @@ CachedFileIOTest::~CachedFileIOTest() {
 *  @return true if CachedFileIO to STDIO performance ratio > 1, false otherwise
 */
 bool CachedFileIOTest::run(size_t samples, size_t jsonSize, double cacheRatio, double sigma) {
+
+	testBasicAPI();
+
 	// initalize parameters
-	this->samplesCount = samples;
+	/*this->samplesCount = samples;
 	this->docSize = jsonSize;
 	this->cacheRatio = cacheRatio;
 	this->sigma = sigma;
@@ -75,10 +78,170 @@ bool CachedFileIOTest::run(size_t samples, size_t jsonSize, double cacheRatio, d
 	else {
 		std::cout << (ratio - 1.0) * 100 << "% - ";
 		std::cout << "FAILED :(\n";
-	}
+	}*/
 
-	return ratio > 1.0;
+	//return ratio > 1.0;
+	return 0;
 }
+
+
+
+void CachedFileIOTest::printResult(const char* useCase, bool result) {
+	if (useCase == nullptr) return;
+	size_t length = strlen(useCase);
+	size_t blanksCount = 80 - length;
+	std::string blanks(blanksCount, '.');
+	std::cout << "\t" << useCase << blanks << (result ? "OK" : "FAILED") << "\n";
+}
+
+/**
+* 
+*  @brief Test CachedFileIO methods on basic corner cases
+* 
+* 
+*/
+bool CachedFileIOTest::testBasicAPI() {
+
+	const char* testName = "Basic API";
+	const char* fileName = "cachedfile.db";	
+	const char* message = "This is a text message!";					      
+	const long long messageLength = strlen(message);
+	const long long cycles = 1000000;
+	bool result;
+
+	CachedFileIO cf;
+	//---------------------------------------------------------------------------------------------------
+	std::cout << "[TEST] " << testName << ":" << std::endl;
+	//---------------------------------------------------------------------------------------------------
+	result = !cf.open(nullptr);
+	printResult("Call open(nullptr)", result);	
+	//---------------------------------------------------------------------------------------------------
+	result = !cf.open("", true);	
+	printResult("Call open(\"\", true) in read only mode", result);	
+	//---------------------------------------------------------------------------------------------------
+	result = !cf.open("file_not_found", true);
+	printResult("Call open(\"file_not_found\", true) in read only mode", result);
+	//---------------------------------------------------------------------------------------------------
+	result = cf.open(fileName);
+	printResult("Call open(\"valid_file\", true) in random access mode", result);	
+	//---------------------------------------------------------------------------------------------------	
+	{
+		bool writeFailed = false;
+		for (long long i = cycles - 1; i >= 0; i--) {
+			writeFailed = !cf.write(i * messageLength, message, messageLength);
+			if (writeFailed) break;
+		}
+		result = !writeFailed;
+		printResult("Multiple reverse writes of short message", result);
+	}
+	//---------------------------------------------------------------------------------------------------
+	{
+		char* strbuf = new char[messageLength + 1];
+		bool readFailed = false;
+		for (long long i = 0; i < cycles; i++) {
+			readFailed = !cf.read(i * messageLength, strbuf, messageLength);
+			if (readFailed) {
+				break;
+			}
+			strbuf[messageLength] = 0; // string null terminator
+			if (strcmp(message, strbuf) != 0) {
+				readFailed = true;
+				break;
+			}
+		}
+		result = !readFailed;
+		printResult("Multiple sequential reads of message and comparing to original message", result);
+		delete[] strbuf;
+	}
+	//---------------------------------------------------------------------------------------------------
+	result = cf.close();
+	printResult("Call close() file", result);		
+	//---------------------------------------------------------------------------------------------------	
+	{
+		result = !cf.write(cycles * messageLength, message, messageLength);
+		printResult("Writes of short message after file closed", result);
+	}
+	//---------------------------------------------------------------------------------------------------
+	{
+		char* strbuf = new char[messageLength + 1];
+		result = !cf.read(cycles * messageLength, strbuf, messageLength);
+		delete[] strbuf;
+		printResult("Read of short message after file closed", result);
+	}
+	//---------------------------------------------------------------------------------------------------
+	result = cf.open(fileName);
+	printResult("Call open(\"valid_file\", true) in read only mode", result);
+	//---------------------------------------------------------------------------------------------------	
+	const char* newMessage = "His rot to dust change.";
+	const long long newMessageLength = strlen(newMessage);
+	{			
+		bool writeFailed = false;
+		for (long long i = 0; i < cycles; i++) {
+			writeFailed = !cf.write(i * newMessageLength, newMessage, newMessageLength);
+			if (writeFailed) {
+				break;
+			}
+		}
+		result = !writeFailed || (!cf.flush());
+		printResult("Multiple sequential overwrites of short message", result);
+	}
+	//---------------------------------------------------------------------------------------------------
+	{		
+		char* strbuf = new char[newMessageLength + 1];
+		bool readFailed = false;
+		for (long long i = 0; i < cycles; i++) {
+			readFailed = !cf.read(i * newMessageLength, strbuf, newMessageLength);
+			if (readFailed) {
+				break;
+			}
+			strbuf[newMessageLength] = 0; // string null terminator
+			if (strcmp(newMessage, strbuf) != 0) {
+				readFailed = true;
+				break;
+			}
+		}
+		result = !readFailed;
+		printResult("Multiple sequential reads of message and comparing to original message", result);
+		delete[] strbuf;
+	}
+	//---------------------------------------------------------------------------------------------------
+	{
+		size_t fileSize = cf.getFileSize();
+		size_t expectedDataSize = (cycles * newMessageLength);
+		size_t expectedPages = (expectedDataSize / PAGE_SIZE) + (expectedDataSize % PAGE_SIZE ? 1 : 0);
+		size_t expectedFileSize = expectedPages * PAGE_SIZE;
+		result = fileSize == expectedFileSize;
+		printResult("Checking getFileSize()", result);
+	}
+	//---------------------------------------------------------------------------------------------------
+	{
+		size_t filesystemSize = std::filesystem::file_size(fileName);
+		result = cf.getFileSize() == filesystemSize;
+		printResult("Comparing getFileSize() to std::filesystem", result);
+	}
+	//std::filesystem::remove(fileName);
+
+	return true;
+	/*
+
+	bool open(const char* path, size_t cache = DEFAULT_CACHE, bool readOnly = false);
+	bool close();
+	bool isOpen();
+	bool isReadOnly();
+
+	size_t read(size_t position, void* dataBuffer, size_t length);
+	size_t write(size_t position, const void* dataBuffer, size_t length);
+	size_t flush();
+
+	void   resetStats();
+	double getStats(CachedFileStats type);
+	size_t getFileSize();
+	size_t getCacheSize();
+	size_t setCacheSize(size_t cacheSize);*/
+}
+
+
+
 
 
 

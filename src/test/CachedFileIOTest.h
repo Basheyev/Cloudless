@@ -34,6 +34,9 @@ namespace Cloudless {
 		double sigma;
 		std::mutex outputLock;
 
+		void printResult(const char* useCase, bool result);
+		bool testBasicAPI();
+
 		double cachedRandomWrites();
 		double randNormal(double mean, double stddev);
 		double cachedRandomReads();
