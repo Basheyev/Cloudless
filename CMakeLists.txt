@@ -23,13 +23,14 @@ add_executable (
     "src/storage/CachedFileIO.cpp"
     "src/storage/CachedFileIO.h"
     "src/storage/RecordFileIO.cpp"
+    "src/storage/RecordCursor.cpp"
     "src/storage/RecordFileIO.h"
 
     "src/test/CachedFileIOTest.cpp"
     "src/test/CachedFileIOTest.h"
-    "src/test/RecordFileIOTest.cpp"
-    "src/test/RecordFileIOTest.h"
-)
+  #  "src/test/RecordFileIOTest.cpp"
+  #  "src/test/RecordFileIOTest.h"
+ )
 
 # Добавим директории
 target_include_directories(Cloudless

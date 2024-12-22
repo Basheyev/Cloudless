@@ -1,6 +1,6 @@
 /******************************************************************************
 *
-*  CachedFileIO class header
+*  CachedFileIO class implementation
 *
 *  CachedFileIO is designed to improve the performance of file I/O
 *  operations by utilizing LRU caching and ensuring thread safety.
@@ -485,9 +485,9 @@ double CachedFileIO::getStats(CachedFileStats type) {
 
 /**
 *
-*  @brief Get current file size
+*  @brief Get current file data size
 *
-*  @return actual file size in bytes
+*  @return actual file data size in bytes
 *
 */
 size_t CachedFileIO::getFileSize() {

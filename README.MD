@@ -50,19 +50,17 @@ attachments are stored on three other nodes for backup purposes.
 
 ## 4. Cloudless modules
 
-1. Storage - Virtual file system in a single file, creation/modification/deletion 
+1. **Storage** - Virtual file system in a single file, creation/modification/deletion 
 of markdown articles, link specification and generation, file attachments, version management,
 full-text indexing, stream compression/decompression, basic disaster recovery mechanisms. 
-Possible stack: SQLite, zlib/lz4, libgit, lucene++/xapian.
 
-2. Explorer - User interface: hierarchical navigation, full-text search, knowledge graph
+2. **Explorer** - User interface: hierarchical navigation, full-text search, knowledge graph
 navigator, editor for articles and files with version control, data viewer, multi-language 
 support, auto-updates. Possible stack: Qt.
 
-3. Security - Access control, asymmetric keys, authentication of nodes and users 
-(names, tokens). Possible stack: libsodium/openssl, jwt++.
+3. **Security** - Access control, asymmetric keys, authentication of nodes and users 
+(names, tokens).
 
-4. Sync - Automatic peer discovery (advanced peer discovery), synchronization
-with policies (public/private data), access control, data recovery, integrity verification
-(hashing), multithreading for faster data exchange, performance tracking and insights. 
-Possible stack: ZeroMQ, libtorrent, rsync.
+4. **Sync** - Automatic peer discovery, synchronization with policies (public/private data),
+access control, data recovery, integrity verification (hashing), multithreading for 
+faster data exchange, performance tracking and insights. 

@@ -89,7 +89,7 @@ bool CachedFileIOTest::run(size_t samples, size_t jsonSize, double cacheRatio, d
 void CachedFileIOTest::printResult(const char* useCase, bool result) {
 	if (useCase == nullptr) return;
 	size_t length = strlen(useCase);
-	size_t blanksCount = 80 - length;
+	size_t blanksCount = 90 - length;
 	std::string blanks(blanksCount, '.');
 	std::cout << "\t" << useCase << blanks << (result ? "OK" : "FAILED") << "\n";
 }
@@ -183,7 +183,7 @@ bool CachedFileIOTest::testBasicAPI() {
 			}
 		}
 		result = !writeFailed || (!cf.flush());
-		printResult("Multiple sequential overwrites of short message", result);
+		printResult("Multiple sequential overwrites of new message", result);
 	}
 	//---------------------------------------------------------------------------------------------------
 	{		
@@ -201,7 +201,7 @@ bool CachedFileIOTest::testBasicAPI() {
 			}
 		}
 		result = !readFailed;
-		printResult("Multiple sequential reads of message and comparing to original message", result);
+		printResult("Multiple sequential reads of message and comparing to new message", result);
 		delete[] strbuf;
 	}
 	//---------------------------------------------------------------------------------------------------
