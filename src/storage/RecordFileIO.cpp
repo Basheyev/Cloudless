@@ -109,6 +109,7 @@ uint64_t RecordFileIO::getFileSize() {
 *
 */
 uint64_t RecordFileIO::getTotalRecords() {
+	std::shared_lock lock(storageMutex);
 	return storageHeader.totalRecords;
 }
 
@@ -120,6 +121,7 @@ uint64_t RecordFileIO::getTotalRecords() {
 * 
 */
 uint64_t RecordFileIO::getTotalFreeRecords() {
+	std::shared_lock lock(storageMutex);
 	return storageHeader.totalFreeRecords;
 }
 
@@ -139,7 +141,7 @@ std::shared_ptr<RecordCursor> RecordFileIO::createRecord(const void* data, uint3
 	// Lock storage for exclusive writing
 	std::unique_lock lock(storageMutex);
 		
-	// Allocate new record and link to previous record
+	// Allocate new record and link to last record
 	RecordHeader newRecordHeader;
 	uint64_t recordPosition = allocateRecord(length, newRecordHeader);
 	if (recordPosition == NOT_FOUND) return nullptr;
