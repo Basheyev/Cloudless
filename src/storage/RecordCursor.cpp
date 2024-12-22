@@ -1,4 +1,21 @@
-
+/******************************************************************************
+*
+*  RecordCursor class implementation
+*
+*  RecordCursor is designed for seamless storage of binary records of
+*  arbitary size (max record size limited to 4Gb), accessing records as
+*  linked list and reuse space of deleted records. RecordFileIO uses
+*  CachedFileIO to cache frequently accessed data.
+*
+*  Features:
+*    - create/read/update/delete records of arbitrary size
+*    - navigate records: first, last, next, previous, exact position
+*    - reuse space of deleted records
+*    - data consistency check (checksum)
+*
+*  (C) Cloudless, Bolat Basheyev 2022-2024
+*
+******************************************************************************/
 
 
 
@@ -9,13 +26,20 @@ using namespace Cloudless::Storage;
 
 
 
-
-RecordCursor::RecordCursor(RecordFileIO& rf) : recordFile(rf) {
-
+/*
+*  @brief RecordCursor constructor
+*/
+RecordCursor::RecordCursor(RecordFileIO& rf, RecordHeader& header, uint64_t position) : recordFile(rf) {
+	std::unique_lock lock(cursorMutex);
+	memcpy(&recordHeader, &header, sizeof(RecordHeader));
+	currentPosition = position;
 }
 
 
-
+/*
+*  @brief Checks if cursor is still valid
+*  @returns true if valid, false otherwise
+*/
 bool RecordCursor::isValid() {
 	// Check if cursor invalidated after record deletion
 	if (currentPosition == NOT_FOUND) return false;
@@ -41,10 +65,8 @@ bool RecordCursor::isValid() {
 
 
 /*
-*
 * @brief Get cursor position
 * @return current cursor position in database
-*
 */
 uint64_t RecordCursor::getPosition() {	
 	std::shared_lock lock(cursorMutex);
@@ -54,11 +76,9 @@ uint64_t RecordCursor::getPosition() {
 
 
 /*
-*
 * @brief Set cursor position
 * @param[in] offset - offset from file beginning
 * @return true - if offset points to consistent record, false - otherwise
-*
 */
 bool RecordCursor::setPosition(uint64_t offset) {
 	
@@ -79,10 +99,8 @@ bool RecordCursor::setPosition(uint64_t offset) {
 
 
 /*
-*
 * @brief Moves cursor to the next record in database
 * @return true - if next record exists, false - otherwise
-*
 */
 bool RecordCursor::next() {
 	{
@@ -96,10 +114,8 @@ bool RecordCursor::next() {
 
 
 /*
-*
 * @brief Moves cursor to the previois record in database
 * @return true - if previous record exists, false - otherwise
-*
 */
 bool RecordCursor::previous() {
 	{
@@ -114,10 +130,8 @@ bool RecordCursor::previous() {
 
 
 /*
-*
 * @brief Get actual data payload length in bytes of current record
 * @return returns data payload length in bytes or zero if fails
-*
 */
 uint32_t RecordCursor::getDataLength() {
 	std::shared_lock lock(cursorMutex);
@@ -128,10 +142,8 @@ uint32_t RecordCursor::getDataLength() {
 
 
 /*
-*
 * @brief Get maximum capacity in bytes of current record
 * @return returns maximum capacity in bytes or zero if fails
-*
 */
 uint32_t RecordCursor::getRecordCapacity() {
 	std::shared_lock lock(cursorMutex);
@@ -142,10 +154,8 @@ uint32_t RecordCursor::getRecordCapacity() {
 
 
 /*
-*
 * @brief Get current record's next neighbour
 * @return returns offset of next neighbour or NOT_FOUND if fails
-*
 */
 uint64_t RecordCursor::getNextPosition() {
 	std::shared_lock lock(cursorMutex);
@@ -156,10 +166,8 @@ uint64_t RecordCursor::getNextPosition() {
 
 
 /*
-*
 * @brief Get current record's previous neighbour
 * @return returns offset of previous neighbour or NOT_FOUND if fails
-*
 */
 uint64_t RecordCursor::getPrevPosition() {
 	std::shared_lock lock(cursorMutex);
@@ -170,14 +178,10 @@ uint64_t RecordCursor::getPrevPosition() {
 
 
 /*
-*
 * @brief Reads record data in current position and checks consistency
-*
 * @param[out] data - pointer to the user buffer
 * @param[in]  length - bytes to read to the user buffer
-*
-* @return returns offset of the record or NOT_FOUND if data corrupted
-*
+* @return returns true or false if data corrupted
 */
 bool RecordCursor::getRecordData(void* data, uint32_t length) {
 	if (currentPosition == NOT_FOUND || length == 0) return NOT_FOUND;
@@ -199,26 +203,20 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 
 
 /*
-*
 * @brief Updates record's data in current position.
 * if data length exceeds current record capacity,
 * then record moves to new place with appropriate capacity.
-*
 * @param[in] data - pointer to new data
 * @param[in] length - length of data in bytes
 * @param[out] result - updated record header information
-*
-* @return returns current offset of record or NOT_FOUND if fails
-*
+* @return returns true or false if fails
 */
 bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 
 	if (recordFile.isReadOnly() || currentPosition == NOT_FOUND) return false;
 
 	// Lock cursor for changes
-	std::unique_lock lock(cursorMutex);
-	constexpr uint64_t HEADER_SIZE = sizeof(RecordHeader);
-	constexpr uint32_t HEADER_PAYLOAD_SIZE = HEADER_SIZE - sizeof(recordHeader.headChecksum);
+	std::unique_lock lock(cursorMutex);	
 	uint64_t bytesWritten;
 
 	//------------------------------------------------------------------	

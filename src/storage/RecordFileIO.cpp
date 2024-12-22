@@ -140,24 +140,24 @@ std::shared_ptr<RecordCursor> RecordFileIO::createRecord(const void* data, uint3
 	std::unique_lock lock(storageMutex);
 		
 	// Allocate new record
-	std::shared_ptr<RecordCursor> recordCursor = std::make_shared<RecordCursor>(*this);
-	uint64_t recordPosition = allocateRecord(length, recordCursor->recordHeader);
+	RecordHeader newRecordHeader;
+	uint64_t recordPosition = allocateRecord(length, newRecordHeader);
 	if (recordPosition == NOT_FOUND) return nullptr;
-	recordCursor->currentPosition = recordPosition;
-
-	// Fill record header fields and link to previous record	
-	RecordHeader& newRecordHeader = recordCursor->recordHeader;
+		
+	// Fill record header fields and link to previous record		
 	newRecordHeader.next = NOT_FOUND;                       
 	newRecordHeader.dataLength = length;
 	newRecordHeader.bitFlags = 0;
-	newRecordHeader.dataChecksum = checksum((uint8_t*) data, length);
-	uint32_t headerDataLength = sizeof(RecordHeader) - sizeof(newRecordHeader.headChecksum);
-	newRecordHeader.headChecksum = checksum((uint8_t*)&newRecordHeader, headerDataLength);
+	newRecordHeader.dataChecksum = checksum((uint8_t*) data, length);	
+	newRecordHeader.headChecksum = checksum((uint8_t*)&newRecordHeader, HEADER_PAYLOAD_SIZE);
 
-	// Write record header and data to the storage file
-	constexpr uint64_t HEADER_SIZE = sizeof(RecordHeader);
+	// Write record header and data to the storage file	
 	cachedFile.write(recordPosition, &newRecordHeader, HEADER_SIZE);
 	cachedFile.write(recordPosition + HEADER_SIZE, data, length);
+
+	// Create cursor and return it
+	std::shared_ptr<RecordCursor> recordCursor;
+	recordCursor = std::make_shared<RecordCursor>(*this, newRecordHeader, recordPosition);
 
 	// Return the cursor of created record
 	return recordCursor;
@@ -180,10 +180,9 @@ std::shared_ptr<RecordCursor> RecordFileIO::getRecord(uint64_t recordPosition) {
 	if (recPos == NOT_FOUND || header.bitFlags & RECORD_DELETED_BIT) return nullptr;
 
 	// If everything is ok - create cursor and copy to its internal buffer
-	std::shared_ptr<RecordCursor> recordCursor = std::make_shared<RecordCursor>(*this);
-	memcpy(&recordCursor->recordHeader, &header, sizeof(RecordHeader));
-	recordCursor->currentPosition = recordPosition;
-		
+	std::shared_ptr<RecordCursor> recordCursor;
+	recordCursor = std::make_shared<RecordCursor>(*this, header, recordPosition);
+			
 	return recordCursor;
 
 }

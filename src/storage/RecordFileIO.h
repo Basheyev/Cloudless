@@ -65,6 +65,8 @@ namespace Cloudless {
 			uint32_t    headChecksum;      // Checksum for header consistency check
 		} RecordHeader;
 
+		constexpr uint64_t HEADER_SIZE = sizeof(RecordHeader);
+		constexpr uint32_t HEADER_PAYLOAD_SIZE = HEADER_SIZE - sizeof(RecordHeader::headChecksum);
 
 		//----------------------------------------------------------------------------
 		// RecordFileIO
@@ -124,7 +126,9 @@ namespace Cloudless {
 		class RecordCursor {
 			friend class RecordFileIO;
 		public:
-			RecordCursor(RecordFileIO& rf);
+			
+			RecordCursor(RecordFileIO& rf, RecordHeader& rh, uint64_t position);
+
 			bool getRecordData(void* data, uint32_t length);                 // maybe starting position required
 			bool setRecordData(const void* data, uint32_t length);           // maybe starting position required
 			bool isValid();
