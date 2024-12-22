@@ -26,11 +26,28 @@ add_executable (
     "src/storage/RecordCursor.cpp"
     "src/storage/RecordFileIO.h"
 
+)
+
+
+add_executable (
+    
+    CloudlessTests     
+    
+    "src/test/CloudlessTests.cpp"
+
+    "src/storage/CachedFileIO.cpp"
+    "src/storage/CachedFileIO.h"
+    "src/storage/RecordFileIO.cpp"
+    "src/storage/RecordCursor.cpp"
+    "src/storage/RecordFileIO.h"
+
     "src/test/CachedFileIOTest.cpp"
     "src/test/CachedFileIOTest.h"
   #  "src/test/RecordFileIOTest.cpp"
   #  "src/test/RecordFileIOTest.h"
- )
+    
+)
+
 
 # Добавим директории
 target_include_directories(Cloudless
@@ -41,8 +58,18 @@ target_include_directories(Cloudless
     PUBLIC ${CMAKE_SOURCE_DIR}/src/test
 )
 
+# Добавим директории
+target_include_directories(CloudlessTests
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/explorer
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/security
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/storage
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/sync
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/test
+)
+
 # Установка стандарта C++ 20
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET Cloudless PROPERTY CXX_STANDARD 20)
+  set_property(TARGET CloudlessTests PROPERTY CXX_STANDARD 20)
 endif()
 
