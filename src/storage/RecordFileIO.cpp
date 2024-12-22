@@ -139,21 +139,21 @@ std::shared_ptr<RecordCursor> RecordFileIO::createRecord(const void* data, uint3
 	// Lock storage for exclusive writing
 	std::unique_lock lock(storageMutex);
 		
-	// Allocate new record
+	// Allocate new record and link to previous record
 	RecordHeader newRecordHeader;
 	uint64_t recordPosition = allocateRecord(length, newRecordHeader);
 	if (recordPosition == NOT_FOUND) return nullptr;
 		
-	// Fill record header fields and link to previous record		
+	// Fill record header fields		
 	newRecordHeader.next = NOT_FOUND;                       
 	newRecordHeader.dataLength = length;
 	newRecordHeader.bitFlags = 0;
 	newRecordHeader.dataChecksum = checksum((uint8_t*) data, length);	
-	newRecordHeader.headChecksum = checksum((uint8_t*)&newRecordHeader, HEADER_PAYLOAD_SIZE);
+	newRecordHeader.headChecksum = checksum((uint8_t*)&newRecordHeader, RECORD_HEADER_PAYLOAD_SIZE);
 
 	// Write record header and data to the storage file	
-	cachedFile.write(recordPosition, &newRecordHeader, HEADER_SIZE);
-	cachedFile.write(recordPosition + HEADER_SIZE, data, length);
+	cachedFile.write(recordPosition, &newRecordHeader, RECORD_HEADER_SIZE);
+	cachedFile.write(recordPosition + RECORD_HEADER_SIZE, data, length);
 
 	// Create cursor and return it
 	std::shared_ptr<RecordCursor> recordCursor;
@@ -287,7 +287,7 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 
 	// Update cursor position to the neighbour record
 	if (newCursorPosition != NOT_FOUND) {		
-		memcpy(&cursor->recordHeader, newCursorRecordHeader, sizeof(RecordHeader));
+		memcpy(&cursor->recordHeader, newCursorRecordHeader, RECORD_HEADER_SIZE);
 		cursor->currentPosition = newCursorPosition;
 	} else {
 		// invalidate cursor if there is no neighbour records
@@ -326,7 +326,7 @@ void RecordFileIO::createStorageHeader() {
 
 	storageHeader.signature = KNOWLEDGE_SIGNATURE;
 	storageHeader.version = KNOWLEDGE_VERSION;
-	storageHeader.endOfFile = sizeof(StorageHeader);
+	storageHeader.endOfFile = STORAGE_HEADER_SIZE;
 
 	storageHeader.totalRecords = 0;
 	storageHeader.firstRecord = NOT_FOUND;
@@ -347,8 +347,8 @@ void RecordFileIO::createStorageHeader() {
 *  @return true - if succeeded, false - if failed
 */
 bool RecordFileIO::writeStorageHeader() {
-	uint64_t bytesWritten = cachedFile.write(0, &storageHeader, sizeof(StorageHeader));
-	if (bytesWritten != sizeof(StorageHeader)) return false;
+	uint64_t bytesWritten = cachedFile.write(0, &storageHeader, STORAGE_HEADER_SIZE);
+	if (bytesWritten != STORAGE_HEADER_SIZE) return false;
 	return true;
 }
 
@@ -362,14 +362,14 @@ bool RecordFileIO::loadStorageHeader() {
 	
 	// read storage header
 	StorageHeader sh;
-	uint64_t bytesRead = cachedFile.read(0, &sh, sizeof(StorageHeader));
-	if (bytesRead != sizeof(StorageHeader)) return false;
+	uint64_t bytesRead = cachedFile.read(0, &sh, STORAGE_HEADER_SIZE);
+	if (bytesRead != STORAGE_HEADER_SIZE) return false;
 	
 	// check signature and version
 	if (sh.signature != KNOWLEDGE_SIGNATURE) return false;
 	if (sh.version != KNOWLEDGE_VERSION) return false;
 
-	memcpy(&storageHeader, &sh, sizeof(StorageHeader));
+	memcpy(&storageHeader, &sh, STORAGE_HEADER_SIZE);
 	
 	return true;
 }
@@ -384,12 +384,11 @@ bool RecordFileIO::loadStorageHeader() {
 */
 uint64_t RecordFileIO::readRecordHeader(uint64_t offset, RecordHeader& header) {
 	// Read header
-	uint64_t bytesRead = cachedFile.read(offset, &header, sizeof(RecordHeader));
-	if (bytesRead != sizeof(RecordHeader)) return NOT_FOUND;
+	uint64_t bytesRead = cachedFile.read(offset, &header, RECORD_HEADER_SIZE);
+	if (bytesRead != RECORD_HEADER_SIZE) return NOT_FOUND;
 	
-	// Check data consistency
-	uint32_t headerDataLength = sizeof(RecordHeader) - sizeof(header.headChecksum);
-	uint32_t expectedChecksum = checksum((uint8_t*)&header, headerDataLength);
+	// Check data consistency	
+	uint32_t expectedChecksum = checksum((uint8_t*)&header, RECORD_HEADER_PAYLOAD_SIZE);
 	if (expectedChecksum != header.headChecksum) return NOT_FOUND;
 	
 	return offset;
@@ -405,13 +404,12 @@ uint64_t RecordFileIO::readRecordHeader(uint64_t offset, RecordHeader& header) {
 */
 uint64_t RecordFileIO::writeRecordHeader(uint64_t offset, RecordHeader& header) {
 	
-	// calculate checksum and write to the record header end
-	uint32_t headerDataLength = sizeof(RecordHeader) - sizeof(header.headChecksum);
-	header.headChecksum = checksum((uint8_t*)&header, headerDataLength);
-	
+	// calculate checksum of header payload	
+	header.headChecksum = checksum((uint8_t*)&header, RECORD_HEADER_PAYLOAD_SIZE);
+
 	// write header
-	uint64_t bytesWritten = cachedFile.write(offset, &header, sizeof(RecordHeader));
-	if (bytesWritten != sizeof(RecordHeader)) return NOT_FOUND;
+	uint64_t bytesWritten = cachedFile.write(offset, &header, RECORD_HEADER_SIZE);
+	if (bytesWritten != RECORD_HEADER_SIZE) return NOT_FOUND;
 	
 	// return header offset in file
 	return offset;
@@ -453,20 +451,20 @@ uint64_t RecordFileIO::allocateRecord(uint32_t capacity, RecordHeader& result) {
 */
 uint64_t RecordFileIO::createFirstRecord(uint32_t capacity, RecordHeader& result) {
 	// clear record header
-	memset(&result, 0, sizeof(RecordHeader));
+	memset(&result, 0, RECORD_HEADER_SIZE);
 	// set value to capacity
 	result.next = NOT_FOUND;
 	result.previous = NOT_FOUND;
 	result.recordCapacity = capacity;
 	result.dataLength = 0;
 	// calculate offset right after Storage header
-	uint64_t offset = sizeof(StorageHeader);
+	uint64_t offset = STORAGE_HEADER_SIZE;
 
 	// lock and update storage header
 	std::unique_lock lock(storageMutex);
 	storageHeader.firstRecord = offset;
     storageHeader.lastRecord = offset;
-	storageHeader.endOfFile += sizeof(RecordHeader) + capacity;
+	storageHeader.endOfFile += RECORD_HEADER_SIZE + capacity;
 	storageHeader.totalRecords++;
 	writeStorageHeader();
 	
@@ -501,7 +499,7 @@ uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result) 
 	result.dataLength = 0;
 
 	storageHeader.lastRecord = freeRecordOffset;
-	storageHeader.endOfFile += sizeof(RecordHeader) + capacity;
+	storageHeader.endOfFile += RECORD_HEADER_SIZE + capacity;
 	storageHeader.totalRecords++;
 	writeStorageHeader();
 

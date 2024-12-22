@@ -31,7 +31,7 @@ using namespace Cloudless::Storage;
 */
 RecordCursor::RecordCursor(RecordFileIO& rf, RecordHeader& header, uint64_t position) : recordFile(rf) {
 	std::unique_lock lock(cursorMutex);
-	memcpy(&recordHeader, &header, sizeof(RecordHeader));
+	memcpy(&recordHeader, &header, RECORD_HEADER_SIZE);
 	currentPosition = position;
 }
 
@@ -91,7 +91,7 @@ bool RecordCursor::setPosition(uint64_t offset) {
 	// If everything is ok - copy to internal buffer
 	{
 		std::unique_lock lock(cursorMutex);
-		memcpy(&recordHeader, &header, sizeof RecordHeader);
+		memcpy(&recordHeader, &header, RECORD_HEADER_SIZE);
 		currentPosition = offset;
 	}
 	return true;
@@ -188,7 +188,7 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 	{
 		std::shared_lock lock(cursorMutex);
 		uint64_t bytesToRead = std::min(recordHeader.dataLength, length);
-		uint64_t dataOffset = currentPosition + sizeof(RecordHeader);
+		uint64_t dataOffset = currentPosition + RECORD_HEADER_SIZE;
 		{
 			std::shared_lock lock(recordFile.storageMutex);
 			recordFile.cachedFile.read(dataOffset, data, bytesToRead);
@@ -227,13 +227,13 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 		recordHeader.dataLength = length;
 		// Update data and header checksum
 		recordHeader.dataChecksum = recordFile.checksum((uint8_t*)data, length);		
-		recordHeader.headChecksum = recordFile.checksum((uint8_t*)&recordHeader, HEADER_PAYLOAD_SIZE);				
+		recordHeader.headChecksum = recordFile.checksum((uint8_t*)&recordHeader, RECORD_HEADER_PAYLOAD_SIZE);				
 		{
 			// Lock storage and write record header and data	
 			std::unique_lock lock(recordFile.storageMutex);						
-			bytesWritten = recordFile.cachedFile.write(currentPosition, &recordHeader, HEADER_SIZE);
-			bytesWritten += recordFile.cachedFile.write(currentPosition + HEADER_SIZE, data, length);
-			return bytesWritten == (HEADER_SIZE + length);
+			bytesWritten = recordFile.cachedFile.write(currentPosition, &recordHeader, RECORD_HEADER_SIZE);
+			bytesWritten += recordFile.cachedFile.write(currentPosition + RECORD_HEADER_SIZE, data, length);
+			return bytesWritten == (RECORD_HEADER_SIZE + length);
 		}			
 	}
 
@@ -254,7 +254,7 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 	newRecordHeader.previous = recordHeader.previous;
 	newRecordHeader.dataLength = length;
 	newRecordHeader.dataChecksum = recordFile.checksum((uint8_t*)data, length);	
-	newRecordHeader.headChecksum = recordFile.checksum((uint8_t*)&newRecordHeader, HEADER_PAYLOAD_SIZE);
+	newRecordHeader.headChecksum = recordFile.checksum((uint8_t*)&newRecordHeader, RECORD_HEADER_PAYLOAD_SIZE);
 		
 	{
 		// Lock storage 
@@ -269,15 +269,15 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 		};
 
 		// Write new record header and data to the storage file		
-		bytesWritten = recordFile.cachedFile.write(offset, &newRecordHeader, HEADER_SIZE);
-		bytesWritten += recordFile.cachedFile.write(offset + HEADER_SIZE, data, length);
+		bytesWritten = recordFile.cachedFile.write(offset, &newRecordHeader, RECORD_HEADER_SIZE);
+		bytesWritten += recordFile.cachedFile.write(offset + RECORD_HEADER_SIZE, data, length);
 	}
 
 	// Update current record and position
-	memcpy(&recordHeader, &newRecordHeader, HEADER_SIZE);
+	memcpy(&recordHeader, &newRecordHeader, RECORD_HEADER_SIZE);
 	currentPosition = offset;
 
-	return bytesWritten == (HEADER_SIZE + length);
+	return bytesWritten == (RECORD_HEADER_SIZE + length);
 
 }
 

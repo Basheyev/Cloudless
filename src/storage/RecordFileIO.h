@@ -50,7 +50,8 @@ namespace Cloudless {
 			uint64_t      firstFreeRecord;     // First free record offset
 			uint64_t      lastFreeRecord;      // Last free record offset
 		} StorageHeader;
-
+		
+		constexpr uint64_t STORAGE_HEADER_SIZE = sizeof(StorageHeader);
 
 		//----------------------------------------------------------------------------
 		// Record header structure (40 bytes)
@@ -65,8 +66,8 @@ namespace Cloudless {
 			uint32_t    headChecksum;      // Checksum for header consistency check
 		} RecordHeader;
 
-		constexpr uint64_t HEADER_SIZE = sizeof(RecordHeader);
-		constexpr uint32_t HEADER_PAYLOAD_SIZE = HEADER_SIZE - sizeof(RecordHeader::headChecksum);
+		constexpr uint64_t RECORD_HEADER_SIZE = sizeof(RecordHeader);
+		constexpr uint32_t RECORD_HEADER_PAYLOAD_SIZE = RECORD_HEADER_SIZE - sizeof(RecordHeader::headChecksum);
 
 		//----------------------------------------------------------------------------
 		// RecordFileIO
