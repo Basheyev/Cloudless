@@ -11,6 +11,7 @@ namespace Cloudless {
 		bool insertNewRecords(const char* filename, size_t recordCount);
 		void run(const char* filename);
 		void runLoadTest(const char* filename, size_t amount);
+		void execute();
 	private:
 
 	};

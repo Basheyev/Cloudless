@@ -33,20 +33,20 @@ add_executable (
     
     CloudlessTests     
     
-    "src/test/CloudlessTests.cpp"
-
     "src/storage/CachedFileIO.cpp"
     "src/storage/CachedFileIO.h"
     "src/storage/RecordFileIO.cpp"
     "src/storage/RecordCursor.cpp"
     "src/storage/RecordFileIO.h"
 
-    "src/test/CachedFileIOTest.cpp"
-    "src/test/CachedFileIOTest.h"
+    "src/tests/CloudlessTests.cpp"
+    "src/tests/CloudlessTests.h"
+    "src/tests/TestCachedFileIO.cpp"
+    "src/tests/TestCachedFileIO.h"
   #  "src/test/RecordFileIOTest.cpp"
   #  "src/test/RecordFileIOTest.h"
     
-)
+ )
 
 
 # Добавим директории
@@ -54,8 +54,7 @@ target_include_directories(Cloudless
     PUBLIC ${CMAKE_SOURCE_DIR}/src/explorer
     PUBLIC ${CMAKE_SOURCE_DIR}/src/security
     PUBLIC ${CMAKE_SOURCE_DIR}/src/storage
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/sync
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/test
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/sync    
 )
 
 # Добавим директории
@@ -64,7 +63,7 @@ target_include_directories(CloudlessTests
     PUBLIC ${CMAKE_SOURCE_DIR}/src/security
     PUBLIC ${CMAKE_SOURCE_DIR}/src/storage
     PUBLIC ${CMAKE_SOURCE_DIR}/src/sync
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/test
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/tests
 )
 
 # Установка стандарта C++ 20
