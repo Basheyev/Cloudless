@@ -4,14 +4,15 @@
 *
 *  RecordFileIO is designed for seamless storage of binary records of
 *  arbitary size (max record size limited to 4Gb), accessing records as
-*  linked list and reuse space of deleted records. RecordFileIO uses
-*  CachedFileIO to cache frequently accessed data.
+*  linked list and reuse space of deleted records using Record Cursor. 
+*  RecordFileIO uses CachedFileIO to cache frequently accessed data.
 *
 *  Features:
-*    - create/read/update/delete records of arbitrary size
-*    - navigate records: first, last, next, previous, exact position
+*    - create/read/delete records of arbitrary size
+*    - navigate records: first, last, exact position
 *    - reuse space of deleted records
 *    - data consistency check (checksum)
+*    - thread safety
 *
 *  (C) Cloudless, Bolat Basheyev 2022-2024
 *
@@ -226,6 +227,7 @@ std::shared_ptr<RecordCursor> RecordFileIO::getLastRecord() {
 */
 bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 
+	// FYI: cursor::isValid locks storageMutex so do it before unique lock
 	if (cursor == nullptr || cachedFile.isReadOnly() || !cursor->isValid()) return false;
 
 	// Lock storage for exclusive writing

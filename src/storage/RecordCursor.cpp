@@ -2,16 +2,15 @@
 *
 *  RecordCursor class implementation
 *
-*  RecordCursor is designed for seamless storage of binary records of
-*  arbitary size (max record size limited to 4Gb), accessing records as
-*  linked list and reuse space of deleted records. RecordFileIO uses
-*  CachedFileIO to cache frequently accessed data.
+*  RecordCursor is designed for seamless traversal of records, accessing 
+*  records as linked list and reuse space of deleted records. RecordCursor 
+*  uses RecordFileIO to access storage.
 *
 *  Features:
-*    - create/read/update/delete records of arbitrary size
-*    - navigate records: first, last, next, previous, exact position
-*    - reuse space of deleted records
+*    - read/update/delete records of arbitrary size
+*    - navigate records: next, previous
 *    - data consistency check (checksum)
+*    - thread safety
 *
 *  (C) Cloudless, Bolat Basheyev 2022-2024
 *

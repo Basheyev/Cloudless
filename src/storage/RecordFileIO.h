@@ -1,17 +1,18 @@
 /******************************************************************************
 *
-*  RecordFileIO class header
+*  RecordFileIO & RecordCursor class header
 *
-*  RecordFileIO is designed for seamless storage of binary records of
-*  arbitary size (max record size limited to 4Gb), accessing records as
-*  linked list and reuse space of deleted records. RecordFileIO uses
-*  CachedFileIO to cache frequently accessed data.
+*  RecordFileIO & RecordCursor is designed for seamless storage of binary 
+*  records of arbitary size (max record size limited to 4Gb), accessing 
+*  records as linked list and reuse space of deleted records. RecordFileIO 
+*  uses CachedFileIO to cache frequently accessed data.
 *
 *  Features:
 *    - create/read/update/delete records of arbitrary size
 *    - navigate records: first, last, next, previous, exact position
 *    - reuse space of deleted records
 *    - data consistency check (checksum)
+*    - thread safety
 *
 *  (C) Cloudless, Bolat Basheyev 2022-2024
 * 
@@ -31,8 +32,8 @@ namespace Cloudless {
 		// Knowledge Storage header signature and version
 		//----------------------------------------------------------------------------
 		constexpr uint32_t KNOWLEDGE_SIGNATURE = 0x574F4E4B;   // KNOW signature
-		constexpr uint32_t KNOWLEDGE_VERSION = 0x00000001;   // Version 1
-		constexpr uint64_t RECORD_DELETED_BIT = 1ULL << 63;   // Highest bit
+		constexpr uint32_t KNOWLEDGE_VERSION   = 0x00000001;   // Version 1
+		constexpr uint64_t RECORD_DELETED_BIT  = 1ULL << 63;   // Highest bit
 
 		//----------------------------------------------------------------------------
 		// Knowledge Storage header structure (64 bytes)
