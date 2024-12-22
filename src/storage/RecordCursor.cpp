@@ -42,7 +42,11 @@ RecordCursor::RecordCursor(RecordFileIO& rf, RecordHeader& header, uint64_t posi
 */
 bool RecordCursor::isValid() {
 	// Check if cursor invalidated after record deletion
-	if (currentPosition == NOT_FOUND) return false;
+	{
+		std::unique_lock lock(cursorMutex);
+		if (currentPosition == NOT_FOUND) return false;
+	}
+
 	// Sample record header
 	RecordHeader recordSample;
 	uint64_t samplePosition;
@@ -183,20 +187,22 @@ uint64_t RecordCursor::getPrevPosition() {
 * @param[in]  length - bytes to read to the user buffer
 * @return returns true or false if data corrupted
 */
-bool RecordCursor::getRecordData(void* data, uint32_t length) {
+bool RecordCursor::getRecordData(void* data, uint32_t length) {	
+	
+	// Lock cursor for reading
+	std::shared_lock lock(cursorMutex);
+
 	if (currentPosition == NOT_FOUND || length == 0) return NOT_FOUND;
+	uint64_t bytesToRead = std::min(recordHeader.dataLength, length);
+	uint64_t dataOffset = currentPosition + RECORD_HEADER_SIZE;
 	{
-		std::shared_lock lock(cursorMutex);
-		uint64_t bytesToRead = std::min(recordHeader.dataLength, length);
-		uint64_t dataOffset = currentPosition + RECORD_HEADER_SIZE;
-		{
-			std::shared_lock lock(recordFile.storageMutex);
-			recordFile.cachedFile.read(dataOffset, data, bytesToRead);
-		}
-		// check data consistency by checksum
-		uint32_t dataCheckSum = recordFile.checksum((uint8_t*)data, bytesToRead);
-		if (dataCheckSum != recordHeader.dataChecksum) return NOT_FOUND;
+		std::shared_lock lock(recordFile.storageMutex);
+		recordFile.cachedFile.read(dataOffset, data, bytesToRead);
 	}
+	// check data consistency by checksum
+	uint32_t dataCheckSum = recordFile.checksum((uint8_t*)data, bytesToRead);
+	if (dataCheckSum != recordHeader.dataChecksum) return NOT_FOUND;
+	
 	return currentPosition;
 }
 
@@ -212,11 +218,11 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 * @return returns true or false if fails
 */
 bool RecordCursor::setRecordData(const void* data, uint32_t length) {
-
-	if (recordFile.isReadOnly() || currentPosition == NOT_FOUND) return false;
-
+		
 	// Lock cursor for changes
 	std::unique_lock lock(cursorMutex);	
+	if (recordFile.isReadOnly() || currentPosition == NOT_FOUND) return false;
+
 	uint64_t bytesWritten;
 
 	//------------------------------------------------------------------	
