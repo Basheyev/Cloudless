@@ -24,7 +24,7 @@
 #include <chrono>
 #include <iostream>
 
-using namespace Cloudless;
+using namespace Cloudless::Storage;
 
 /*
 * 
@@ -132,8 +132,12 @@ uint64_t RecordFileIO::getTotalFreeRecords() {
 * @return returns shared pointer to the new record or nullptr if fails
 */
 std::shared_ptr<RecordCursor> RecordFileIO::createRecord(const void* data, uint32_t length) {
-	// Check if file is open and write is permitted
-	if (!cachedFile.isOpen() || cachedFile.isReadOnly()) return nullptr;
+
+	// Check if file writes are permitted
+	if (cachedFile.isReadOnly()) return nullptr;
+
+	// Lock storage for exclusive writing
+	std::unique_lock lock(storageMutex);
 		
 	// Allocate new record
 	std::shared_ptr<RecordCursor> recordCursor = std::make_shared<RecordCursor>(*this);
@@ -166,15 +170,16 @@ std::shared_ptr<RecordCursor> RecordFileIO::createRecord(const void* data, uint3
 * @return returns shared pointer to the consistent record or nullptr if record is not found or corrupt
 */
 std::shared_ptr<RecordCursor> RecordFileIO::getRecord(uint64_t recordPosition) {
-	// Check if file is open
-	if (!cachedFile.isOpen()) return nullptr;
+
+	// Lock storage for reading (concurrent reads allowed)
+	std::shared_lock lock(storageMutex);
 
 	// Try to read record header
 	RecordHeader header;
 	uint64_t recPos = readRecordHeader(recordPosition, header);
 	if (recPos == NOT_FOUND || header.bitFlags & RECORD_DELETED_BIT) return nullptr;
 
-	// If everything is ok - copy to internal buffer
+	// If everything is ok - create cursor and copy to its internal buffer
 	std::shared_ptr<RecordCursor> recordCursor = std::make_shared<RecordCursor>(*this);
 	memcpy(&recordCursor->recordHeader, &header, sizeof(RecordHeader));
 	recordCursor->currentPosition = recordPosition;
@@ -191,8 +196,10 @@ std::shared_ptr<RecordCursor> RecordFileIO::getRecord(uint64_t recordPosition) {
 *
 */
 std::shared_ptr<RecordCursor> RecordFileIO::getFirstRecord() {
-	if (!cachedFile.isOpen()) return nullptr;
-	if (storageHeader.firstRecord == NOT_FOUND) return nullptr;
+	{
+		std::shared_lock lock(storageMutex);
+		if (storageHeader.firstRecord == NOT_FOUND) return nullptr;
+	}
 	return getRecord(storageHeader.firstRecord);
 }
 
@@ -204,8 +211,10 @@ std::shared_ptr<RecordCursor> RecordFileIO::getFirstRecord() {
 *
 */
 std::shared_ptr<RecordCursor> RecordFileIO::getLastRecord() {
-	if (!cachedFile.isOpen()) return nullptr;
-	if (storageHeader.lastRecord == NOT_FOUND) return nullptr;
+	{
+		std::shared_lock lock(storageMutex);
+		if (storageHeader.lastRecord == NOT_FOUND) return nullptr;
+	}
 	return getRecord(storageHeader.lastRecord);
 }
 
@@ -216,7 +225,10 @@ std::shared_ptr<RecordCursor> RecordFileIO::getLastRecord() {
 */
 bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 
-	if (cursor == nullptr || !cachedFile.isOpen() || cachedFile.isReadOnly() || !cursor->isValid()) return false;
+	if (cursor == nullptr || cachedFile.isReadOnly() || !cursor->isValid()) return false;
+
+	// Lock storage for exclusive writing
+	std::unique_lock lock(storageMutex);
 	
 	// check siblings
 	RecordHeader& recordHeader = cursor->recordHeader;
@@ -312,7 +324,7 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 * @brief Initialize in memory storage header for new database
 */
 void RecordFileIO::createStorageHeader() {
-	
+
 	storageHeader.signature = KNOWLEDGE_SIGNATURE;
 	storageHeader.version = KNOWLEDGE_VERSION;
 	storageHeader.endOfFile = sizeof(StorageHeader);
@@ -324,7 +336,7 @@ void RecordFileIO::createStorageHeader() {
 	storageHeader.totalFreeRecords = 0;
 	storageHeader.firstFreeRecord = NOT_FOUND;
 	storageHeader.lastFreeRecord = NOT_FOUND;
-
+	
 	writeStorageHeader();
 
 }
@@ -336,7 +348,6 @@ void RecordFileIO::createStorageHeader() {
 *  @return true - if succeeded, false - if failed
 */
 bool RecordFileIO::writeStorageHeader() {
-	if (!cachedFile.isOpen()) return false;
 	uint64_t bytesWritten = cachedFile.write(0, &storageHeader, sizeof(StorageHeader));
 	if (bytesWritten != sizeof(StorageHeader)) return false;
 	return true;
@@ -348,17 +359,19 @@ bool RecordFileIO::writeStorageHeader() {
 *  @brief Loads file storage header to memory storage header
 *  @return true - if succeeded, false - if failed
 */
-bool RecordFileIO::loadStorageHeader() {
-	if (!cachedFile.isOpen()) return false;
+bool RecordFileIO::loadStorageHeader() {	
+	
+	// read storage header
 	StorageHeader sh;
 	uint64_t bytesRead = cachedFile.read(0, &sh, sizeof(StorageHeader));
-	// check read success
 	if (bytesRead != sizeof(StorageHeader)) return false;
+	
 	// check signature and version
 	if (sh.signature != KNOWLEDGE_SIGNATURE) return false;
 	if (sh.version != KNOWLEDGE_VERSION) return false;
-	// Copy header data to internal structure
+
 	memcpy(&storageHeader, &sh, sizeof(StorageHeader));
+	
 	return true;
 }
 
@@ -392,12 +405,15 @@ uint64_t RecordFileIO::readRecordHeader(uint64_t offset, RecordHeader& header) {
 *  @return record offset in file or NOT_FOUND if can't write
 */
 uint64_t RecordFileIO::writeRecordHeader(uint64_t offset, RecordHeader& header) {
+	
 	// calculate checksum and write to the record header end
 	uint32_t headerDataLength = sizeof(RecordHeader) - sizeof(header.headChecksum);
 	header.headChecksum = checksum((uint8_t*)&header, headerDataLength);
+	
 	// write header
 	uint64_t bytesWritten = cachedFile.write(offset, &header, sizeof(RecordHeader));
 	if (bytesWritten != sizeof(RecordHeader)) return NOT_FOUND;
+	
 	// return header offset in file
 	return offset;
 }
@@ -446,6 +462,9 @@ uint64_t RecordFileIO::createFirstRecord(uint32_t capacity, RecordHeader& result
 	result.dataLength = 0;
 	// calculate offset right after Storage header
 	uint64_t offset = sizeof(StorageHeader);
+
+	// lock and update storage header
+	std::unique_lock lock(storageMutex);
 	storageHeader.firstRecord = offset;
     storageHeader.lastRecord = offset;
 	storageHeader.endOfFile += sizeof(RecordHeader) + capacity;

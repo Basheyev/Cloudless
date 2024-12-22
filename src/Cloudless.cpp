@@ -10,15 +10,15 @@
 #include <iomanip>
 
 using namespace std;
-using namespace Cloudless;
+using namespace Cloudless::Storage;
 
 
 int main()
 {
 	const char* path = "d://test.bin";
-	Cloudless::CachedFileIO cf;
+	CachedFileIO cf;
 	cf.open(path);
-	Cloudless::RecordFileIO rf(cf);
+	RecordFileIO rf(cf);
 
 	std::string msg = "My message for binary records storage";
 	// Convert timestamp to local time structure
@@ -32,7 +32,8 @@ int main()
 		std::string rnd(6 - i, '#');
 		ss << msg << " #" << i << " timestamp:" << std::put_time(localTime, "%Y-%m-%d %H:%M:%S") << rnd;
 		std::string s = ss.str();
-		rf.createRecord(s.c_str(), s.size());
+		uint32_t len = (uint32_t) s.size();
+		rf.createRecord(s.c_str(), len);
 	}
 
 	std::shared_ptr<RecordCursor> rc = rf.getFirstRecord();

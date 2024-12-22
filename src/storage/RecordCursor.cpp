@@ -5,7 +5,7 @@
 #include "RecordFileIO.h"
 
 
-using namespace Cloudless;
+using namespace Cloudless::Storage;
 
 
 
@@ -21,16 +21,21 @@ bool RecordCursor::isValid() {
 	if (currentPosition == NOT_FOUND) return false;
 	// Sample record header
 	RecordHeader recordSample;
-	uint64_t samplePosition = recordFile.readRecordHeader(currentPosition, recordSample);
-	// Check 
-	bool invalid = 
+	uint64_t samplePosition;
+	{
+		std::shared_lock lock(recordFile.storageMutex);
+		samplePosition = recordFile.readRecordHeader(currentPosition, recordSample);
+	}
+	// Lock for reading check conditions 
+	std::shared_lock lock(cursorMutex);
+	bool invalid =
 		// Record is corrupt
 		(samplePosition == NOT_FOUND) ||
 		// Record is deleted
 		(recordSample.bitFlags & RECORD_DELETED_BIT) ||
 		// Record has been changed
 		(recordSample.headChecksum != recordHeader.headChecksum);
-
+	
 	return !invalid;
 }
 
@@ -41,8 +46,8 @@ bool RecordCursor::isValid() {
 * @return current cursor position in database
 *
 */
-uint64_t RecordCursor::getPosition() {
-	if (!recordFile.isOpen()) return NOT_FOUND;
+uint64_t RecordCursor::getPosition() {	
+	std::shared_lock lock(cursorMutex);
 	return currentPosition;
 }
 
@@ -56,14 +61,19 @@ uint64_t RecordCursor::getPosition() {
 *
 */
 bool RecordCursor::setPosition(uint64_t offset) {
-	if (!recordFile.isOpen()) return false;
+	
 	// Try to read record header
 	RecordHeader header;
-	if (recordFile.readRecordHeader(offset, header) == NOT_FOUND) return false;
-
+	{
+		std::shared_lock lock(recordFile.storageMutex);
+		if (recordFile.readRecordHeader(offset, header) == NOT_FOUND) return false;
+	}
 	// If everything is ok - copy to internal buffer
-	memcpy(&recordHeader, &header, sizeof RecordHeader);
-	currentPosition = offset;
+	{
+		std::unique_lock lock(cursorMutex);
+		memcpy(&recordHeader, &header, sizeof RecordHeader);
+		currentPosition = offset;
+	}
 	return true;
 }
 
@@ -75,8 +85,11 @@ bool RecordCursor::setPosition(uint64_t offset) {
 *
 */
 bool RecordCursor::next() {
-	if (!recordFile.isOpen() || currentPosition == NOT_FOUND) return false;
-	if (recordHeader.next == NOT_FOUND) return false;
+	{
+		std::shared_lock lock(cursorMutex);
+		if (currentPosition == NOT_FOUND) return false;
+		if (recordHeader.next == NOT_FOUND) return false;
+	}
 	return setPosition(recordHeader.next);
 }
 
@@ -89,8 +102,11 @@ bool RecordCursor::next() {
 *
 */
 bool RecordCursor::previous() {
-	if (!recordFile.isOpen() || currentPosition == NOT_FOUND) return false;
-	if (recordHeader.previous == NOT_FOUND) return false;
+	{
+		std::shared_lock lock(cursorMutex);
+		if (currentPosition == NOT_FOUND) return false;
+		if (recordHeader.previous == NOT_FOUND) return false;
+	}
 	return setPosition(recordHeader.previous);
 }
 
@@ -104,7 +120,8 @@ bool RecordCursor::previous() {
 *
 */
 uint32_t RecordCursor::getDataLength() {
-	if (!recordFile.isOpen() || currentPosition == NOT_FOUND) return 0;
+	std::shared_lock lock(cursorMutex);
+	if (currentPosition == NOT_FOUND) return 0;
 	return recordHeader.dataLength;
 }
 
@@ -117,7 +134,8 @@ uint32_t RecordCursor::getDataLength() {
 *
 */
 uint32_t RecordCursor::getRecordCapacity() {
-	if (!recordFile.isOpen() || currentPosition == NOT_FOUND) return 0;
+	std::shared_lock lock(cursorMutex);
+	if (currentPosition == NOT_FOUND) return 0;
 	return recordHeader.recordCapacity;
 }
 
@@ -130,7 +148,8 @@ uint32_t RecordCursor::getRecordCapacity() {
 *
 */
 uint64_t RecordCursor::getNextPosition() {
-	if (!recordFile.isOpen() || currentPosition == NOT_FOUND) return NOT_FOUND;
+	std::shared_lock lock(cursorMutex);
+	if (currentPosition == NOT_FOUND) return NOT_FOUND;
 	return recordHeader.next;
 }
 
@@ -143,7 +162,8 @@ uint64_t RecordCursor::getNextPosition() {
 *
 */
 uint64_t RecordCursor::getPrevPosition() {
-	if (!recordFile.isOpen() || currentPosition == NOT_FOUND) return NOT_FOUND;
+	std::shared_lock lock(cursorMutex);
+	if (currentPosition == NOT_FOUND) return NOT_FOUND;
 	return recordHeader.previous;
 }
 
@@ -160,13 +180,19 @@ uint64_t RecordCursor::getPrevPosition() {
 *
 */
 bool RecordCursor::getRecordData(void* data, uint32_t length) {
-	if (!recordFile.isOpen() || currentPosition == NOT_FOUND || length == 0) return NOT_FOUND;
-	uint64_t bytesToRead = std::min(recordHeader.dataLength, length);
-	uint64_t dataOffset = currentPosition + sizeof RecordHeader;
-	recordFile.cachedFile.read(dataOffset, data, bytesToRead);
-	// check data consistency by checksum
-	uint32_t dataCheckSum = recordFile.checksum((uint8_t*)data, bytesToRead);
-	if (dataCheckSum != recordHeader.dataChecksum) return NOT_FOUND;
+	if (currentPosition == NOT_FOUND || length == 0) return NOT_FOUND;
+	{
+		std::shared_lock lock(cursorMutex);
+		uint64_t bytesToRead = std::min(recordHeader.dataLength, length);
+		uint64_t dataOffset = currentPosition + sizeof(RecordHeader);
+		{
+			std::shared_lock lock(recordFile.storageMutex);
+			recordFile.cachedFile.read(dataOffset, data, bytesToRead);
+		}
+		// check data consistency by checksum
+		uint32_t dataCheckSum = recordFile.checksum((uint8_t*)data, bytesToRead);
+		if (dataCheckSum != recordHeader.dataChecksum) return NOT_FOUND;
+	}
 	return currentPosition;
 }
 
@@ -186,52 +212,74 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 *
 */
 bool RecordCursor::setRecordData(const void* data, uint32_t length) {
-	if (!recordFile.isOpen() || recordFile.isReadOnly() ||
-		currentPosition == NOT_FOUND) return false;
-	// if there is enough capacity in record
-	if (length <= recordHeader.recordCapacity) {
-		// Update header data length info without affecting ID
-		recordHeader.dataLength = length;
-		// Update checksum
-		recordHeader.dataChecksum = recordFile.checksum((uint8_t*)data, length);
-		uint32_t headerLength = sizeof RecordHeader - sizeof recordHeader.headChecksum;
-		recordHeader.headChecksum = recordFile.checksum((uint8_t*)&recordHeader, headerLength);
-		// Write record header and data to the storage file
-		constexpr uint64_t HEADER_SIZE = sizeof RecordHeader;
-		recordFile.cachedFile.write(currentPosition, &recordHeader, HEADER_SIZE);
-		recordFile.cachedFile.write(currentPosition + HEADER_SIZE, data, length);
 
-		return currentPosition;
+	if (recordFile.isReadOnly() || currentPosition == NOT_FOUND) return false;
+
+	// Lock cursor for changes
+	std::unique_lock lock(cursorMutex);
+	constexpr uint64_t HEADER_SIZE = sizeof(RecordHeader);
+	constexpr uint32_t HEADER_PAYLOAD_SIZE = HEADER_SIZE - sizeof(recordHeader.headChecksum);
+	uint64_t bytesWritten;
+
+	//------------------------------------------------------------------	
+	// if there is enough capacity in record
+	//------------------------------------------------------------------
+	if (length <= recordHeader.recordCapacity) {
+		// Update header data length info
+		recordHeader.dataLength = length;
+		// Update data and header checksum
+		recordHeader.dataChecksum = recordFile.checksum((uint8_t*)data, length);		
+		recordHeader.headChecksum = recordFile.checksum((uint8_t*)&recordHeader, HEADER_PAYLOAD_SIZE);				
+		{
+			// Lock storage and write record header and data	
+			std::unique_lock lock(recordFile.storageMutex);						
+			bytesWritten = recordFile.cachedFile.write(currentPosition, &recordHeader, HEADER_SIZE);
+			bytesWritten += recordFile.cachedFile.write(currentPosition + HEADER_SIZE, data, length);
+			return bytesWritten == (HEADER_SIZE + length);
+		}			
 	}
 
-	// if there is not enough record capacity, then move record		
+	//------------------------------------------------------------------	
+	// if there is not enough record capacity, then move record	
+	//------------------------------------------------------------------	
 	RecordHeader newRecordHeader;
-	// find free record of required length
-	uint64_t offset = recordFile.allocateRecord(length, newRecordHeader);
-	if (offset == NOT_FOUND) return NOT_FOUND;
+	uint64_t offset;	
+	{
+		// lock storage find free record of required length
+		std::unique_lock lock(recordFile.storageMutex);
+		offset = recordFile.allocateRecord(length, newRecordHeader);
+		if (offset == NOT_FOUND) return false;
+	}	
+
 	// Copy record header fields, update data length and checksum
 	newRecordHeader.next = recordHeader.next;
 	newRecordHeader.previous = recordHeader.previous;
 	newRecordHeader.dataLength = length;
-	newRecordHeader.dataChecksum = recordFile.checksum((uint8_t*)data, length);
-	uint32_t headerLength = sizeof RecordHeader - sizeof newRecordHeader.headChecksum;
-	newRecordHeader.headChecksum = recordFile.checksum((uint8_t*)&newRecordHeader, headerLength);
+	newRecordHeader.dataChecksum = recordFile.checksum((uint8_t*)data, length);	
+	newRecordHeader.headChecksum = recordFile.checksum((uint8_t*)&newRecordHeader, HEADER_PAYLOAD_SIZE);
+		
+	{
+		// Lock storage 
+		std::unique_lock lock(recordFile.storageMutex);
 
-	// Delete old record and add it to the free records list
-	if (!recordFile.addRecordToFreeList(currentPosition)) return NOT_FOUND;
-	// if this is first record, then update storage header
-	if (recordHeader.previous == NOT_FOUND) {
-		recordFile.storageHeader.firstRecord = offset;
-		recordFile.writeStorageHeader();
-	};
-	// Write record header and data to the storage file
-	constexpr uint64_t HEADER_SIZE = sizeof RecordHeader;
-	recordFile.cachedFile.write(offset, &newRecordHeader, HEADER_SIZE);
-	recordFile.cachedFile.write(offset + HEADER_SIZE, data, length);
-	// Update current record in memory
+		// Delete old record and add it to the free records list
+		if (!recordFile.addRecordToFreeList(currentPosition)) return NOT_FOUND;
+		// if this is first record, then update storage header
+		if (recordHeader.previous == NOT_FOUND) {
+			recordFile.storageHeader.firstRecord = offset;
+			recordFile.writeStorageHeader();
+		};
+
+		// Write new record header and data to the storage file		
+		bytesWritten = recordFile.cachedFile.write(offset, &newRecordHeader, HEADER_SIZE);
+		bytesWritten += recordFile.cachedFile.write(offset + HEADER_SIZE, data, length);
+	}
+
+	// Update current record and position
 	memcpy(&recordHeader, &newRecordHeader, HEADER_SIZE);
-	// Set cursor to new updated position
-	return currentPosition = offset;
+	currentPosition = offset;
+
+	return bytesWritten == (HEADER_SIZE + length);
 
 }
 

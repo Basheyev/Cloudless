@@ -10,6 +10,7 @@
 
 
 using namespace Cloudless;
+using namespace Cloudless::Storage;
 
 
 
