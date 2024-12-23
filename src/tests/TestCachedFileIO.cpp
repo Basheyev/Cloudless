@@ -49,8 +49,13 @@ void TestCachedFileIO::execute() {
 	testSequentialReads(cycles, message2);
 	testFileSize(cycles * strlen(message2));
 	testRandomMultithreadWrites();
-	testRandomMultithreadReads();
+	double cachedThroughput = testRandomMultithreadReads();
+	double stdioThroughput = stdioRandomReads();
 
+	bool result = cachedThroughput > stdioThroughput;
+	std::stringstream ss;
+	ss << "CachedFileIO performance comparing to STDIO " << (cachedThroughput / stdioThroughput * 100) << "%";
+	printResult(ss.str().c_str(), result);
 	cf.close();
 
 }
@@ -186,7 +191,7 @@ void TestCachedFileIO::testRandomWritesThread(uint64_t batchNo, uint64_t cycles,
 	}
 
 	std::stringstream ss;
-	ss << "Thread #" << batchNo << " - random writes of " << cycles << " JSONs ( " << bytesWritten << " bytes)";
+	ss << "Thread #" << batchNo << " - random writes of " << cycles << " messages ( " << bytesWritten << " bytes)";
 	printResult(ss.str().c_str(), result);
 
 }
@@ -312,7 +317,7 @@ double TestCachedFileIO::stdioRandomReads() {
 	FILE* file = nullptr;
 
 	char* buf = new char[PAGE_SIZE * 4];
-	size_t length, pos = 0;
+	size_t length, bytesWritten = 0;
 	size_t offset;
 
 	errno_t result = fopen_s(&file, this->fileName, "r+b");
@@ -320,43 +325,34 @@ double TestCachedFileIO::stdioRandomReads() {
 
 	size_t fileSize = std::filesystem::file_size(this->fileName);
 
-	std::cout << "[TEST]  STDIO random read " << samplesCount << " of " << docSize << " byte blocks...\n\t";
-
+	auto startTime = std::chrono::high_resolution_clock::now();
 	length = docSize;
-
-	std::chrono::steady_clock::time_point startTime, endTime;
-	size_t stdioDuration = 0;
 
 	for (size_t i = 0; i < samplesCount; i++) {
 
 		offset = (size_t)(randNormal(0.5, sigma) * double(fileSize - length));
 
-		// offset always positive because its size_t
-		if (offset < fileSize) {
-			startTime = std::chrono::steady_clock::now();
+		if (offset < fileSize) {			
 			_fseeki64(file, offset, SEEK_SET);
 			fread(buf, 1, length, file);
-			endTime = std::chrono::steady_clock::now();
-			stdioDuration += (endTime - startTime).count();
 			buf[length + 1] = 0;
-			pos += length;
+			bytesWritten += length;
 		}
 
 	}
-
-	startTime = std::chrono::steady_clock::now();
-	fflush(file);
-	endTime = std::chrono::steady_clock::now();
-	stdioDuration += (endTime - startTime).count();
-
-	double throughput = (pos / 1024.0 / 1024.0) / (stdioDuration / 1000000000.0);
-
-	std::cout << pos << " bytes (" << stdioDuration / 1000000.0 << "ms), ";
-	std::cout << "Read: " << throughput << " Mb/sec\n\n";
-
+		
 	fclose(file);
-
 	delete[] buf;
+
+	auto endTime = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime);
+	double readTime = duration.count() / 1000000.0;
+	double throughput = (bytesWritten / (1024.0 * 1024.0)) / (readTime / 1000.0);
+
+	bool stdioResult = true;
+	std::stringstream ss;
+	ss << "STDIO random reads " << throughput << " Mb/sec";
+	printResult(ss.str().c_str(), stdioResult);
 
 	return throughput;
 }
