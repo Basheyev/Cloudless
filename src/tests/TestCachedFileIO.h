@@ -46,19 +46,18 @@ namespace Cloudless {
 			void testfileOpen(bool fullCheck);
 			void testSequentialWrites(long long cycles, const char* message);
 			void testReverseWrites(long long cycles, const char* message);			
-			void testSequentialReads(long long cycles, const char* message);
+			double testRandomMultithreadWrites();
 			void testRandomWritesThread(uint64_t batchNo, uint64_t cycles, const char* msg);
+			void testSequentialReads(long long cycles, const char* message);
+			double testRandomMultithreadReads();
+			void testRandomReadsThread(uint64_t batchNo, uint64_t batchSize, uint64_t length);
+			double stdioRandomReads();
 			void testIOAfterClose();
 			void testFileSize(uint64_t expectedDataSize);
-
-			void printResult(const char* useCase, bool result);
-			bool testBasicAPI();
-
-			double testRandomMultithreadWrites();
+			
 			double randNormal(double mean, double stddev);
-			double cachedRandomReads();
-			void cachedRandomReadsThread(uint64_t batchNo, uint64_t batchSize, uint64_t length);
-			double stdioRandomReads();
+			void printResult(const char* useCase, bool result);
+
 		};
 	}
 }
