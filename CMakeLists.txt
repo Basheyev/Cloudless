@@ -20,18 +20,35 @@ add_executable (
     "src/Cloudless.cpp" 
     "src/Cloudless.h"
 
+    "src/libs/civetweb/civetweb.h"
+    "src/libs/civetweb/civetweb.c"
+    "src/libs/civetweb/CivetServer.h"
+    "src/libs/civetweb/CivetServer.cpp"
+
+    "src/navigator/Navigator.h" 
+    "src/navigator/Navigator.cpp"
+
     "src/storage/CachedFileIO.cpp"
     "src/storage/CachedFileIO.h"
     "src/storage/RecordFileIO.cpp"
     "src/storage/RecordCursor.cpp"
     "src/storage/RecordFileIO.h"
 
+ 
 )
 
 
 add_executable (
     
     CloudlessTests     
+        
+    "src/libs/civetweb/civetweb.h"
+    "src/libs/civetweb/civetweb.c"
+    "src/libs/civetweb/CivetServer.h"
+    "src/libs/civetweb/CivetServer.cpp"
+
+    "src/navigator/Navigator.h" 
+    "src/navigator/Navigator.cpp"
     
     "src/storage/CachedFileIO.cpp"
     "src/storage/CachedFileIO.h"
@@ -46,23 +63,25 @@ add_executable (
   #  "src/test/RecordFileIOTest.cpp"
   #  "src/test/RecordFileIOTest.h"
     
- )
+  )
 
+
+target_compile_definitions(Cloudless PRIVATE NO_SSL)
+target_compile_definitions(CloudlessTests PRIVATE NO_SSL)
 
 # Добавим директории
 target_include_directories(Cloudless
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/explorer
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/security
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/storage
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/sync    
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/navigator    
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/storage    
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/libs/civetweb
+    
 )
 
 # Добавим директории
 target_include_directories(CloudlessTests
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/explorer
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/security
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/storage
-    PUBLIC ${CMAKE_SOURCE_DIR}/src/sync
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/libs/civetweb
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/navigator    
+    PUBLIC ${CMAKE_SOURCE_DIR}/src/storage    
     PUBLIC ${CMAKE_SOURCE_DIR}/src/tests
 )
 

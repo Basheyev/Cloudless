@@ -54,12 +54,27 @@ void TestCachedFileIO::execute() {
 
 	bool result = cachedThroughput > stdioThroughput;
 	std::stringstream ss;
-	ss << "CachedFileIO performance comparing to STDIO " << (cachedThroughput / stdioThroughput * 100) << "%";
+	ss << "CachedFileIO performance comparing to STDIO is " << (cachedThroughput / stdioThroughput * 100) << "%";
 	printResult(ss.str().c_str(), result);
 	cf.close();
 
 }
 
+
+
+bool TestCachedFileIO::verify() const {
+	return true;
+}
+
+
+void TestCachedFileIO::cleanup() {
+	if (std::filesystem::exists(this->fileName)) {
+		std::filesystem::remove(this->fileName);
+	}
+}
+
+
+//--------------------------------------------------------------------------------------------------------------
 
 
 void TestCachedFileIO::testfileOpen(bool fullCheck) {
@@ -180,7 +195,7 @@ void TestCachedFileIO::testRandomWritesThread(uint64_t batchNo, uint64_t cycles,
 	for (size_t i = 0; i < cycles; i++) {
 		// generate random
 		offset = size_t(randNormal(0.5, this->sigma) * double(fileSize - length));
-		// offset always positive because its size_t
+		
 		if (offset < fileSize) {
 			if (!cf.write(offset, msg, length)) {
 				result = false;
@@ -390,20 +405,6 @@ void TestCachedFileIO::testFileSize(uint64_t expectedDataSize) {
 	result = cf.getFileSize() == filesystemSize;
 	printResult("Comparing getFileSize() to std::filesystem", result);
 }
-
-
-bool TestCachedFileIO::verify() const {
-	return true;
-}
-
-
-void TestCachedFileIO::cleanup() {
-	if (std::filesystem::exists(this->fileName)) {
-		std::filesystem::remove(this->fileName);
-	}
-}
-
-
 
 
 
