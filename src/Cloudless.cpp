@@ -9,18 +9,23 @@ using namespace std;
 using namespace Cloudless::Storage;
 
 
+
 int main()
 {
     try {
-        // Get the current working directory
-        std::string appDirectory = std::filesystem::current_path().string();
+        // Get the current working directory        
+        std::string appDirectory = std::filesystem::canonical("navigator").string();;
+        
 
         // Set the options for the CivetWeb server
         const char* options[] = {
             "document_root", appDirectory.c_str(), // Serve files from app directory
-            "listening_ports", "8080",            // Port to listen on
-            nullptr                               // End of options
+            "listening_ports", "8080",                   // Port to listen on
+            "index_files", "index.html",                 // Использовать index.html как стартовый файл
+            nullptr                                      // End of options
         };
+
+        std::cout << std::filesystem::exists(appDirectory);
 
         // Initialize CivetWeb server
         CivetServer server(options);
