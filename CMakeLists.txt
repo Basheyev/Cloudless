@@ -54,8 +54,8 @@ add_executable (
     "src/tests/CloudlessTests.h"
     "src/tests/TestCachedFileIO.cpp"
     "src/tests/TestCachedFileIO.h"
-  #  "src/test/RecordFileIOTest.cpp"
-  #  "src/test/RecordFileIOTest.h"
+    "src/tests/TestRecordFileIO.cpp"
+    "src/tests/TestRecordFileIO.h"
     
   )
 

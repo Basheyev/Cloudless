@@ -450,8 +450,10 @@ void TestCachedFileIO::printResult(const char* useCase, bool result) {
 		std::string blanks(blanksCount, '.');	
 		ss << blanks;
 	}
-	std::lock_guard lock(outputLock);
-	std::cout << ss.str() << " " << (result ? "OK" : "FAILED") << "\n";
+	{
+		std::lock_guard lock(outputLock);
+		std::cout << ss.str() << " " << (result ? "OK" : "FAILED") << "\n";
+	}
 }
 
 

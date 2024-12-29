@@ -464,8 +464,7 @@ uint64_t RecordFileIO::createFirstRecord(uint32_t capacity, RecordHeader& result
 	// calculate offset right after Storage header
 	uint64_t offset = STORAGE_HEADER_SIZE;
 
-	// lock and update storage header
-	std::unique_lock lock(storageMutex);
+	// update storage header
 	storageHeader.firstRecord = offset;
     storageHeader.lastRecord = offset;
 	storageHeader.endOfFile += RECORD_HEADER_SIZE + capacity;

@@ -3,6 +3,7 @@
 #include "CachedFileIO.h"
 #include "RecordFileIO.h"
 #include "TestCachedFileIO.h"
+#include "TestRecordFileIO.h"
 
 #include <ctime>
 #include <iomanip>
@@ -32,8 +33,14 @@ int main()
 {
 	CloudlessTests ct;	
 	TestCachedFileIO cfiot;
+	TestRecordFileIO rfiot;
 
-	ct.addTestCase(&cfiot);
+//	ct.addTestCase(&cfiot);
+
+	// TODO: make test multithreaded
+	ct.addTestCase(&rfiot);
+
+	std::filesystem::current_path("F:/");
 
 	ct.run();
 		
