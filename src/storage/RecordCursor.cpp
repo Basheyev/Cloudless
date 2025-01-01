@@ -90,10 +90,11 @@ bool RecordCursor::setPosition(uint64_t offset) {
 	{
 		std::shared_lock lock(recordFile.storageMutex);
 		if (recordFile.readRecordHeader(offset, header) == NOT_FOUND) return false;
-		if (header.bitFlags & RECORD_DELETED_BIT) {
-			return false;
-		}
 	}
+
+	// Check if deleted
+	if (header.bitFlags & RECORD_DELETED_BIT) return false;
+	
 	// Copy to internal buffer
 	{
 		std::unique_lock lock(cursorMutex);
@@ -109,12 +110,13 @@ bool RecordCursor::setPosition(uint64_t offset) {
 * @return true - if next record exists, false - otherwise
 */
 bool RecordCursor::next() {
+	uint64_t nextPos;
 	{
 		std::shared_lock lock(cursorMutex);
-		if (currentPosition == NOT_FOUND) return false;
-		if (recordHeader.next == NOT_FOUND) return false;
+		if (currentPosition == NOT_FOUND || recordHeader.next == NOT_FOUND) return false;		
+		nextPos = recordHeader.next;
 	}
-	return setPosition(recordHeader.next);
+	return setPosition(nextPos);
 }
 
 
@@ -124,12 +126,13 @@ bool RecordCursor::next() {
 * @return true - if previous record exists, false - otherwise
 */
 bool RecordCursor::previous() {
+	uint64_t prevPos;
 	{
 		std::shared_lock lock(cursorMutex);
-		if (currentPosition == NOT_FOUND) return false;
-		if (recordHeader.previous == NOT_FOUND) return false;
+		if (currentPosition == NOT_FOUND || recordHeader.previous == NOT_FOUND) return false;		
+		prevPos = recordHeader.previous;
 	}
-	return setPosition(recordHeader.previous);
+	return setPosition(prevPos);
 }
 
 
@@ -140,9 +143,8 @@ bool RecordCursor::previous() {
 * @return returns data payload length in bytes or zero if fails
 */
 uint32_t RecordCursor::getDataLength() {
-	std::shared_lock lock(cursorMutex);
-	if (currentPosition == NOT_FOUND) return 0;
-	return recordHeader.dataLength;
+	std::shared_lock lock(cursorMutex);	
+	return (currentPosition == NOT_FOUND) ? 0 : recordHeader.dataLength;
 }
 
 
@@ -152,9 +154,8 @@ uint32_t RecordCursor::getDataLength() {
 * @return returns maximum capacity in bytes or zero if fails
 */
 uint32_t RecordCursor::getRecordCapacity() {
-	std::shared_lock lock(cursorMutex);
-	if (currentPosition == NOT_FOUND) return 0;
-	return recordHeader.recordCapacity;
+	std::shared_lock lock(cursorMutex);	
+	return (currentPosition == NOT_FOUND) ? 0 : recordHeader.recordCapacity;
 }
 
 
@@ -164,9 +165,8 @@ uint32_t RecordCursor::getRecordCapacity() {
 * @return returns offset of next neighbour or NOT_FOUND if fails
 */
 uint64_t RecordCursor::getNextPosition() {
-	std::shared_lock lock(cursorMutex);
-	if (currentPosition == NOT_FOUND) return NOT_FOUND;
-	return recordHeader.next;
+	std::shared_lock lock(cursorMutex);	
+	return (currentPosition == NOT_FOUND) ? NOT_FOUND : recordHeader.next;
 }
 
 
@@ -176,9 +176,8 @@ uint64_t RecordCursor::getNextPosition() {
 * @return returns offset of previous neighbour or NOT_FOUND if fails
 */
 uint64_t RecordCursor::getPrevPosition() {
-	std::shared_lock lock(cursorMutex);
-	if (currentPosition == NOT_FOUND) return NOT_FOUND;
-	return recordHeader.previous;
+	std::shared_lock lock(cursorMutex);	
+	return (currentPosition == NOT_FOUND) ? NOT_FOUND : recordHeader.previous;
 }
 
 
@@ -194,7 +193,7 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 	// Lock cursor for reading
 	std::shared_lock lock(cursorMutex);
 
-	if (currentPosition == NOT_FOUND || length == 0) return NOT_FOUND;
+	if (currentPosition == NOT_FOUND || length == 0) return false;
 	uint64_t bytesToRead = std::min(recordHeader.dataLength, length);
 	uint64_t dataOffset = currentPosition + RECORD_HEADER_SIZE;
 	{
@@ -203,9 +202,9 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 	}
 	// check data consistency by checksum
 	uint32_t dataCheckSum = recordFile.checksum((uint8_t*)data, bytesToRead);
-	if (dataCheckSum != recordHeader.dataChecksum) return NOT_FOUND;
+	if (dataCheckSum != recordHeader.dataChecksum) return false;
 	
-	return currentPosition;
+	return true;
 }
 
 

@@ -256,6 +256,7 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 				IDs[pos] = counter;
 			}
 			else {
+				std::unique_lock lock(outputLock);
 				std::cerr << "\n\nDUPLICATES IN TRAVERSAL!!!\n" << "Record ID=" << IDs[pos] << " repeats at=" << counter << "\n";
 				break;
 			}
@@ -272,6 +273,11 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 		}
 		// some how this exceeds records count but still in the loop!?
 		counter++;
+		if (counter >= db->getTotalRecords()) {
+			std::unique_lock lock(outputLock);
+			std::cerr << "Counter exceeds number of total records - CYCLIC REFERENCE!!!\n\n";
+			break;
+		}
 	} while (cursor->previous() /* && counter <= samplesCount*/);
 
 	delete[] buffer;

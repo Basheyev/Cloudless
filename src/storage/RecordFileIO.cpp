@@ -36,6 +36,8 @@ using namespace Cloudless::Storage;
 */
 RecordFileIO::RecordFileIO(CachedFileIO& cachedFile, size_t lookupDepth) : cachedFile(cachedFile), freeLookupDepth(lookupDepth) {
 	
+	std::unique_lock lock(storageMutex);
+
 	// Check if file is open
 	if (!cachedFile.isOpen()) {
 		const char* msg = "Can't operate on closed cached file.";		
@@ -60,7 +62,8 @@ RecordFileIO::RecordFileIO(CachedFileIO& cachedFile, size_t lookupDepth) : cache
 * @brief RecordFileIO destructor and finalizations
 */
 RecordFileIO::~RecordFileIO() {
-	if (!cachedFile.isOpen()) return;	
+	std::unique_lock lock(storageMutex);
+	if (!cachedFile.isOpen()) return;		
 	writeStorageHeader();
 	flush();
 }
@@ -198,11 +201,13 @@ std::shared_ptr<RecordCursor> RecordFileIO::getRecord(uint64_t recordPosition) {
 *
 */
 std::shared_ptr<RecordCursor> RecordFileIO::getFirstRecord() {
+	uint64_t firstPos;
 	{
 		std::shared_lock lock(storageMutex);
 		if (storageHeader.firstRecord == NOT_FOUND) return nullptr;
+		firstPos = storageHeader.firstRecord;
 	}
-	return getRecord(storageHeader.firstRecord);
+	return getRecord(firstPos);
 }
 
 
@@ -213,11 +218,13 @@ std::shared_ptr<RecordCursor> RecordFileIO::getFirstRecord() {
 *
 */
 std::shared_ptr<RecordCursor> RecordFileIO::getLastRecord() {
+	uint64_t lastPos;
 	{
 		std::shared_lock lock(storageMutex);
 		if (storageHeader.lastRecord == NOT_FOUND) return nullptr;
+		lastPos = storageHeader.lastRecord;
 	}
-	return getRecord(storageHeader.lastRecord);
+	return getRecord(lastPos);
 }
 
 
@@ -230,8 +237,9 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 	// FYI: cursor::isValid locks storageMutex so do it before unique lock
 	if (cursor == nullptr || cachedFile.isReadOnly() || !cursor->isValid()) return false;
 
-	// Lock storage for exclusive writing
-	std::unique_lock lock(storageMutex);
+	// Lock storage and cursor for exclusive writing
+	std::unique_lock lockStorage(storageMutex);
+	std::unique_lock lockCursor(cursor->cursorMutex);
 	
 	// check siblings
 	RecordHeader& recordHeader = cursor->recordHeader;
@@ -289,11 +297,12 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 		newCursorRecordHeader = nullptr;
 	}
 
-	// Update cursor position to the neighbour record
-	if (newCursorPosition != NOT_FOUND) {		
+	// Update cursor position to the neighbour record	
+	if (newCursorPosition != NOT_FOUND) {
 		memcpy(&cursor->recordHeader, newCursorRecordHeader, RECORD_HEADER_SIZE);
 		cursor->currentPosition = newCursorPosition;
-	} else {
+	}
+	else {
 		// invalidate cursor if there is no neighbour records
 		cursor->recordHeader.next = NOT_FOUND;
 		cursor->recordHeader.previous = NOT_FOUND;
@@ -302,7 +311,7 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 		cursor->recordHeader.headChecksum = 0;
 		cursor->currentPosition = NOT_FOUND;
 	}
-
+	
 	// Update storage header information about total records number
 	storageHeader.totalRecords--;
 	writeStorageHeader();
@@ -439,7 +448,7 @@ uint64_t RecordFileIO::allocateRecord(uint32_t capacity, RecordHeader& result) {
 		// if found, then just return it
 		if (offset != NOT_FOUND) return offset;
 	}
-
+		
 	// if there is no free records, append to the end of file	
 	return appendNewRecord(capacity, result);
 
@@ -547,7 +556,7 @@ uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result) 
 			result.dataLength = 0;
 
 			// turn off "record deleted" bit
-			result.bitFlags &= ~RECORD_DELETED_BIT;
+			result.bitFlags = freeRecord.bitFlags & (~RECORD_DELETED_BIT);
 						
 			// update storage header last record to new record
 			storageHeader.lastRecord = offset;

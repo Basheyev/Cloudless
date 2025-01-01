@@ -60,7 +60,7 @@ namespace Cloudless {
 		typedef struct {
 			uint64_t    next;              // Next record position in data file
 			uint64_t    previous;          // Previous record position in data file
-			uint64_t    bitFlags;          // Record bit flags (31 bit reserved)
+			uint64_t    bitFlags;          // Record bit flags
 			uint32_t    recordCapacity;    // Record capacity in bytes
 			uint32_t    dataLength;        // Data length in bytes			
 			uint32_t    dataChecksum;      // Checksum for data consistency check		
