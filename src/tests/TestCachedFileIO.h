@@ -41,7 +41,6 @@ namespace Cloudless {
 			size_t docSize;
 			double cacheRatio;
 			double sigma;
-			std::mutex outputLock;
 			
 			void testfileOpen(bool fullCheck);
 			void testSequentialWrites(long long cycles, const char* message);
@@ -56,7 +55,6 @@ namespace Cloudless {
 			void testFileSize(uint64_t expectedDataSize);
 			
 			double randNormal(double mean, double stddev);
-			void printResult(const char* useCase, bool result);
 
 		};
 	}

@@ -28,8 +28,7 @@ namespace Cloudless {
 
 			char* fileName;
 			size_t samplesCount;
-			std::mutex outputLock;
-
+			
 			Storage::CachedFileIO cachedFile;
 			std::shared_ptr<Storage::RecordFileIO> db;
 		};

@@ -27,6 +27,7 @@ void TestCachedFileIO::init() {
 	this->docSize = 479;
 	this->cacheRatio = 0.15;
 	this->sigma = 0.04;
+	finalResult = true;
 	// delete file if exists
 	if (std::filesystem::exists(this->fileName)) {
 		std::filesystem::remove(this->fileName);
@@ -56,6 +57,7 @@ void TestCachedFileIO::execute() {
 	std::stringstream ss;
 	ss << "CachedFileIO performance comparing to STDIO is " << (cachedThroughput / stdioThroughput * 100) << "%";
 	printResult(ss.str().c_str(), result);
+
 	cf.close();
 
 }
@@ -63,7 +65,7 @@ void TestCachedFileIO::execute() {
 
 
 bool TestCachedFileIO::verify() const {
-	return true;
+	return finalResult;
 }
 
 
@@ -91,6 +93,7 @@ void TestCachedFileIO::testfileOpen(bool fullCheck) {
 	}
 	result = cf.open(fileName);
 	printResult("Call open(\"valid_file\") in random access mode", result);
+
 }
 
 
@@ -437,25 +440,6 @@ double TestCachedFileIO::randNormal(double mean, double stddev)
 		return n2 * stddev + mean;
 	}
 }
-
-
-
-void TestCachedFileIO::printResult(const char* useCase, bool result) {
-	if (useCase == nullptr) return;
-	size_t length = strlen(useCase);
-	std::stringstream ss;
-	ss << "\t" << useCase;
-	if (length < 90) {
-		size_t blanksCount = 90 - length;
-		std::string blanks(blanksCount, '.');	
-		ss << blanks;
-	}
-	{
-		std::lock_guard lock(outputLock);
-		std::cout << ss.str() << " " << (result ? "OK" : "FAILED") << "\n";
-	}
-}
-
 
 
 

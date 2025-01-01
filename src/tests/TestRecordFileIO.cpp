@@ -47,9 +47,13 @@ void TestRecordFileIO::execute() {
 	insertNewRecords(samplesCount / 2);
 	readAscending(false);
 
-
-	// multithreaded
 	multithreaded();
+
+	std::stringstream ss;
+	ss << "Total records: " << db->getTotalRecords();
+
+	printResult(ss.str().c_str(), true);
+
 }
 
 bool TestRecordFileIO::verify() const {
@@ -84,7 +88,7 @@ bool TestRecordFileIO::multithreaded() {
 			workers.emplace_back([this, i, batchSize]() {
 				{
 					std::unique_lock lock(outputLock);
-					std::cout << "Thread #" << i << " started\n";
+					std::cout << "\tStarting thread #" << i << " started\n";
 				}
 				generateData(batchSize);
 				readAscending(false);
@@ -106,7 +110,7 @@ bool TestRecordFileIO::multithreaded() {
 	ss << "Concurrent tests " << cachedDuration << " s \n";
 	{
 		std::unique_lock lock(outputLock);
-		std::cout << ss.str();
+		printResult(ss.str().c_str(), result);
 	}
 
 	return true;
@@ -119,15 +123,8 @@ bool TestRecordFileIO::multithreaded() {
 *  @param[in] recordsCount - total records to generate
 */
 bool TestRecordFileIO::generateData(size_t recordsCount) {
-
 	
 	char buffer[1024] = { 0 };
-
-
-	{
-		std::unique_lock lock(outputLock);
-		std::cout << "[TEST] Generating " << recordsCount << " data records...\n";
-	}
 
 	auto startTime = std::chrono::high_resolution_clock::now();
 	size_t bytesWritten = 0;
@@ -142,18 +139,22 @@ bool TestRecordFileIO::generateData(size_t recordsCount) {
 		length = (uint32_t)ss.str().length();
 		memset(buffer, 0, sizeof(buffer));
 		memcpy(buffer, ss.str().c_str(), length);		
-		db->createRecord(buffer, length + padding);		
-		bytesWritten += length;
+		if (db->createRecord(buffer, length + padding) != nullptr) {
+			bytesWritten += length;
+		}
 	}
+
+	db->flush();
 
 	auto endTime = std::chrono::high_resolution_clock::now();
 	double duration = (endTime - startTime).count() / 1000000000.0;
 	double throughput = (bytesWritten / 1024.0 / 1024.0) / duration;
 
-	{
-		std::unique_lock lock(outputLock);
-		std::cout << "OK in " << duration << "s payload throughput " << throughput << " Mb/s\n";
-	}
+	bool result = (bytesWritten == length * recordsCount);
+	std::stringstream ss;
+	ss << "Generating " << recordsCount << " data records: " << duration << "s payload throughput " << throughput << " Mb/s";
+	printResult(ss.str().c_str(), result);
+	
 
 	return true;
 }
@@ -162,22 +163,21 @@ bool TestRecordFileIO::generateData(size_t recordsCount) {
 
 bool TestRecordFileIO::readAscending(bool verbose) {
 
-	
-	{
-		std::unique_lock lock(outputLock);
-		std::cout << "[TEST] Reading " << db->getTotalRecords() << " data records in ASCENDING order...\n";
-		if (verbose) std::cout << "-----------------------------------------------------------\n\n";
-	}
+
+
+	if (verbose) std::cout << "-----------------------------------------------------------\n\n";
+
 	auto startTime = std::chrono::high_resolution_clock::now();
 
 	auto cursor = db->getFirstRecord();
-	
+	if (cursor == nullptr) return false;
+
 	size_t counter = 0;
 	size_t prev, next;
 	size_t bytesRead = 0;
 	char* buffer = new char[65536];
 	do {
-		if (cursor != nullptr && !cursor->isValid()) {
+		if (cursor == nullptr || !cursor->isValid()) {
 			std::unique_lock lock(outputLock);
 			std::cout << "Cursor invalidated at " << counter << " record\n";
 			break;
@@ -198,17 +198,18 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 			std::cout << "Data: '" << buffer << "'\n\n";
 		}
 		counter++;
-	} while (cursor->next());
+	} while (cursor->next() && counter <= samplesCount);
 	auto endTime = std::chrono::high_resolution_clock::now();	
 	double duration = (endTime - startTime).count() / 1000000000.0;
 	double throughput = (bytesRead / 1024.0 / 1024.0) / duration;
 	delete[] buffer;	
 	{
-		std::unique_lock lock(outputLock);
-		std::cout << "TOTAL READ: " << counter << " records ";
-		std::cout << "in " << duration << "s";
-		std::cout << " payload throughput " << throughput << " Mb/s";
-		std::cout << " - [" << ((db->getTotalRecords() == counter) ? "OK]\n" : "FAILED!]\n");
+		bool result = (counter == db->getTotalRecords());
+		std::stringstream ss;		
+		ss << "Reading " << counter << "/" << db->getTotalRecords() << " records in ASCENDING order ";
+		ss << "in " << duration << "s";
+		ss << " payload throughput " << throughput << " Mb/s";
+		printResult(ss.str().c_str(), result);
 	}
 	return true;
 }
@@ -216,17 +217,19 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 
 
 bool TestRecordFileIO::readDescending(bool verbose) {
-	{
-		std::unique_lock lock(outputLock);
-		std::cout << "[TEST] Reading " << db->getTotalRecords() << " data records in DESCENDING order...\n";
-		if (verbose) std::cout << "-----------------------------------------------------------\n\n";
-	}
+
+
+	if (verbose) std::cout << "-----------------------------------------------------------\n\n";
+
 	auto cursor = db->getLastRecord();
+	if (cursor == nullptr) return false;
+
 	size_t counter = 0;
 	size_t prev, next;
 	char* buffer = new char[65536];
+	bool result = true;
 	do {
-		if (cursor != nullptr && !cursor->isValid()) {
+		if (cursor == nullptr || !cursor->isValid()) {
 			std::unique_lock lock(outputLock);
 			std::cout << "Cursor invalidated at " << counter << " record\n";
 			break;
@@ -234,9 +237,12 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 		uint32_t length = cursor->getDataLength();
 		prev = cursor->getPrevPosition();
 		next = cursor->getNextPosition();
-		if (!cursor->getRecordData(buffer, length)) break;
+		if (!cursor->getRecordData(buffer, length)) {
+			result = false;
+			break;
+		}
 		buffer[length] = 0;
-		if (verbose) {			
+		if (verbose) {
 			std::unique_lock lock(outputLock);
 			std::cout << "Record at position: " << cursor->getPosition();
 			std::cout << " Previous: " << ((prev == NOT_FOUND) ? 0 : prev);
@@ -246,11 +252,15 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 			std::cout << "Data: '" << buffer << "'\n\n";
 		}
 		counter++;
-	} while (cursor->previous());
+	} while (cursor->previous() && counter <= samplesCount);
+
 	delete[] buffer;
 	{
-		std::unique_lock lock(outputLock);
-		std::cout << "TOTAL READ: " << counter << " records\n\n";
+		size_t totalRecords = db->getTotalRecords();
+		if (result) result = (counter == totalRecords);
+		std::stringstream ss;
+		ss << "Reading " << counter << "/" << db->getTotalRecords() << " records in DESCENDING order " << (counter > samplesCount ? " Cursor invalidated " : "");
+		printResult(ss.str().c_str(), result);
 	}
 	return true;
 }
@@ -260,15 +270,19 @@ bool TestRecordFileIO::removeEvenRecords(bool verbose) {
 
 	{
 		std::unique_lock lock(outputLock);
-		std::cout << "[TEST] Deleting even data records...\n";
+		
 		if (verbose) std::cout << "-----------------------------------------------------------\n\n";
 	}
 	auto startTime = std::chrono::high_resolution_clock::now();
+	
 	auto cursor = db->getFirstRecord();
+	if (cursor == nullptr) return false;
+
 	size_t counter = 0;
 	size_t prev, next;
+	size_t amount = db->getTotalRecords();
 	do {
-		if (cursor != nullptr && !cursor->isValid()) {
+		if (!cursor->isValid()) {
 			std::unique_lock lock(outputLock);
 			std::cout << "Cursor invalidated at " << counter << " record\n";
 			break;
@@ -286,27 +300,29 @@ bool TestRecordFileIO::removeEvenRecords(bool verbose) {
 		}
 		db->removeRecord(cursor);
 		counter++;		
-	} while (cursor->next());
+	} while (cursor->next() && counter < samplesCount);
 	auto endTime = std::chrono::high_resolution_clock::now();	
 	auto duration = (endTime - startTime).count() / 1000000000.0;
 
 	{
-		std::unique_lock lock(outputLock);
-		std::cout << "TOTAL DELETED: " << counter << " records ";
-		std::cout << "in " << duration << "s";
+		bool result = (counter == amount);
+		std::stringstream ss;
+		ss << "Deleting even data records. ";
+		ss << "TOTAL DELETED: " << counter << "/" << samplesCount << " records ";
+		ss << "in " << duration << "s";
+		printResult(ss.str().c_str(), result);
 	}
 
 	return true;
 }
 
+
 bool TestRecordFileIO::insertNewRecords(size_t recordsCount) {
 
-	{
-		std::unique_lock lock(outputLock);
-		std::cout << "[TEST] Inserting " << recordsCount << " data records...\n";
-	}
+	
 	auto startTime = std::chrono::high_resolution_clock::now();
 	uint32_t length;
+	bool result = true;
 	for (size_t i = 0; i < recordsCount; i++) {
 		std::stringstream ss;
 		ss << "inserted record data " << i*2 << " and " << std::rand();
@@ -314,63 +330,18 @@ bool TestRecordFileIO::insertNewRecords(size_t recordsCount) {
 		length = (uint32_t)ss.str().length();
 		std::string str = ss.str();
 		const char* dataPtr = str.c_str();
-		db->createRecord(dataPtr, length);
+		result = result && (db->createRecord(dataPtr, length) != nullptr);
 	}
+	db->flush();
 	auto endTime = std::chrono::high_resolution_clock::now();
+	auto duration = (endTime - startTime).count() / 1000000000.0;
 	{
-		std::unique_lock lock(outputLock);
-		std::cout << "OK in " << (endTime - startTime).count() / 1000000000.0 << "s";
+		
+		std::stringstream ss;
+		ss << "Inserting " << recordsCount << " data records ";
+		ss << "in " << duration << "s";
+		printResult(ss.str().c_str(), result);
 	}
 	
 	return true;
 }
-
-
-
-/*
-void TestRecordFileIO::execute() {
-	const char* path = "d://test.bin";
-	CachedFileIO cf;
-	cf.open(path);
-	RecordFileIO rf(cf);
-
-	std::string msg = "My message for binary records storage";
-	// Convert timestamp to local time structure
-
-
-
-	for (uint64_t i = 0; i < 5; i++) {
-		std::stringstream ss;
-		auto timestamp = std::time(nullptr);
-		std::tm* localTime = std::localtime(&timestamp);
-		std::string rnd(6 - i, '#');
-		ss << msg << " #" << i << " timestamp:" << std::put_time(localTime, "%Y-%m-%d %H:%M:%S") << rnd;
-		std::string s = ss.str();
-		uint32_t len = (uint32_t)s.size();
-		rf.createRecord(s.c_str(), len);
-	}
-
-	std::shared_ptr<RecordCursor> rc = rf.getFirstRecord();
-
-	//rc->next();
-	rf.removeRecord(rc);
-
-
-	if (rc == nullptr) return 0;
-
-	int i = 0;
-	char str[128];
-	do {
-		uint32_t len = rc->getDataLength();
-		if (rc->getRecordData(str, len)) {
-			str[len] = 0;
-			std::cout << "Record: " << i << " Payload: " << str << "\n";
-		}
-		i++;
-	} while (rc->next());
-
-	cf.close();
-
-	//std::filesystem::remove(path);
-
-}*/

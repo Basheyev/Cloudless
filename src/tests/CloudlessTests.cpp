@@ -19,7 +19,7 @@ using namespace Cloudless::Tests;
 void CloudlessTests::run()
 {
 	for (ITestCase* tc : testCases) {		
-		std::cout << "[TEST] " << tc->getName() << ":\n";
+		std::cout << "\n[TEST] " << tc->getName() << ":\n";
 		tc->init();
 		tc->execute();
 		bool result = tc->verify();		
@@ -35,9 +35,7 @@ int main()
 	TestCachedFileIO cfiot;
 	TestRecordFileIO rfiot;
 
-//	ct.addTestCase(&cfiot);
-
-	// TODO: make test multithreaded
+	ct.addTestCase(&cfiot);
 	ct.addTestCase(&rfiot);
 
 	std::filesystem::current_path("F:/");
