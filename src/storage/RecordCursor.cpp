@@ -42,7 +42,7 @@ RecordCursor::RecordCursor(RecordFileIO& rf, RecordHeader& header, uint64_t posi
 bool RecordCursor::isValid() {
 	// Check if cursor invalidated after record deletion
 	{
-		std::unique_lock lock(cursorMutex);
+		std::shared_lock lock(cursorMutex);
 		if (currentPosition == NOT_FOUND) return false;
 	}
 
@@ -90,8 +90,11 @@ bool RecordCursor::setPosition(uint64_t offset) {
 	{
 		std::shared_lock lock(recordFile.storageMutex);
 		if (recordFile.readRecordHeader(offset, header) == NOT_FOUND) return false;
+		if (header.bitFlags & RECORD_DELETED_BIT) {
+			return false;
+		}
 	}
-	// If everything is ok - copy to internal buffer
+	// Copy to internal buffer
 	{
 		std::unique_lock lock(cursorMutex);
 		memcpy(&recordHeader, &header, RECORD_HEADER_SIZE);

@@ -3,6 +3,7 @@
 #include <iostream>
 #include <sstream>
 #include <filesystem>
+#include <unordered_map>
 
 #include "CloudlessTests.h"
 #include "RecordFileIO.h"

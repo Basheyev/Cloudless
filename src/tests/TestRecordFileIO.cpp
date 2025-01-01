@@ -22,14 +22,14 @@ std::string TestRecordFileIO::getName() const {
 
 void TestRecordFileIO::init() {
 	fileName = (char*)"records.bin";
-	samplesCount = 10000;
+	samplesCount = 1000;
 
 	// Functional test
 	if (std::filesystem::exists(fileName)) {
 		std::filesystem::remove(fileName);
 	}
 	
-	if (!cachedFile.open(fileName, false, 16 * 1024 * 1024)) {
+	if (!cachedFile.open(fileName, false)) {
 		std::cout << "ERROR: Can't open file '" << fileName << "' in write mode.\n";
 		return;
 	}
@@ -77,7 +77,7 @@ void TestRecordFileIO::cleanup() {
 bool TestRecordFileIO::multithreaded() {
 	
 	// Break samples to hardware cores count
-	uint64_t batchesCount = std::thread::hardware_concurrency() / 4;
+	uint64_t batchesCount = std::thread::hardware_concurrency();
 	uint64_t batchSize = samplesCount / batchesCount;
 	
 
@@ -177,7 +177,7 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 	size_t bytesRead = 0;
 	char* buffer = new char[65536];
 	do {
-		if (cursor == nullptr || !cursor->isValid()) {
+		if (!cursor->isValid()) {
 			std::unique_lock lock(outputLock);
 			std::cout << "Cursor invalidated at " << counter << " record\n";
 			break;
@@ -185,7 +185,11 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 		uint32_t length = cursor->getDataLength();
 		prev = cursor->getPrevPosition();
 		next = cursor->getNextPosition();		
-		if (!cursor->getRecordData(buffer, length)) break;
+		if (!cursor->getRecordData(buffer, length)) {
+			std::unique_lock lock(outputLock);
+			std::cout << "Record corrupt at " << counter << " record\n";
+			break;
+		}
 		buffer[length] = 0;
 		bytesRead += length;
 		if (verbose) {			
@@ -198,7 +202,9 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 			std::cout << "Data: '" << buffer << "'\n\n";
 		}
 		counter++;
-	} while (cursor->next() && counter <= samplesCount);
+		// TODO: check data corrpution and cycles references in file records
+
+	} while (cursor->next() /* && counter <= samplesCount*/);
 	auto endTime = std::chrono::high_resolution_clock::now();	
 	double duration = (endTime - startTime).count() / 1000000000.0;
 	double throughput = (bytesRead / 1024.0 / 1024.0) / duration;
@@ -228,8 +234,12 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 	size_t prev, next;
 	char* buffer = new char[65536];
 	bool result = true;
+
+	std::unordered_map<uint64_t, uint64_t> IDs;
+
 	do {
-		if (cursor == nullptr || !cursor->isValid()) {
+		uint64_t pos = cursor->getPosition();
+		if (!cursor->isValid()) {
 			std::unique_lock lock(outputLock);
 			std::cout << "Cursor invalidated at " << counter << " record\n";
 			break;
@@ -241,6 +251,15 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 			result = false;
 			break;
 		}
+		else {
+			if (IDs.find(pos) == IDs.end()) {
+				IDs[pos] = counter;
+			}
+			else {
+				std::cerr << "\n\nDUPLICATES IN TRAVERSAL!!!\n" << "Record ID=" << IDs[pos] << " repeats at=" << counter << "\n";
+				break;
+			}
+		}
 		buffer[length] = 0;
 		if (verbose) {
 			std::unique_lock lock(outputLock);
@@ -251,8 +270,9 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 			std::cout << "\n";
 			std::cout << "Data: '" << buffer << "'\n\n";
 		}
+		// some how this exceeds records count but still in the loop!?
 		counter++;
-	} while (cursor->previous() && counter <= samplesCount);
+	} while (cursor->previous() /* && counter <= samplesCount*/);
 
 	delete[] buffer;
 	{
@@ -300,7 +320,7 @@ bool TestRecordFileIO::removeEvenRecords(bool verbose) {
 		}
 		db->removeRecord(cursor);
 		counter++;		
-	} while (cursor->next() && counter < samplesCount);
+	} while (cursor->next() /* && counter < samplesCount*/);
 	auto endTime = std::chrono::high_resolution_clock::now();	
 	auto duration = (endTime - startTime).count() / 1000000000.0;
 
