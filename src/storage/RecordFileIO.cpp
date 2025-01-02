@@ -62,9 +62,11 @@ RecordFileIO::RecordFileIO(CachedFileIO& cachedFile, size_t lookupDepth) : cache
 * @brief RecordFileIO destructor and finalizations
 */
 RecordFileIO::~RecordFileIO() {
-	std::unique_lock lock(storageMutex);
-	if (!cachedFile.isOpen()) return;		
-	writeStorageHeader();
+	{
+		std::unique_lock lock(storageMutex);
+		if (!cachedFile.isOpen()) return;
+		writeStorageHeader();
+	}
 	flush();
 }
 
@@ -74,6 +76,7 @@ RecordFileIO::~RecordFileIO() {
 *  @return true if all changed cache pages been persisted, false otherwise
 */
 bool RecordFileIO::flush() {
+	std::unique_lock lock(storageMutex);
 	return cachedFile.flush();
 }
 
@@ -157,7 +160,7 @@ std::shared_ptr<RecordCursor> RecordFileIO::createRecord(const void* data, uint3
 	newRecordHeader.dataChecksum = checksum((uint8_t*) data, length);	
 	newRecordHeader.headChecksum = checksum((uint8_t*)&newRecordHeader, RECORD_HEADER_PAYLOAD_SIZE);
 
-	// Write record header and data to the storage file	
+	// Write record header and data to the storage file		
 	cachedFile.write(recordPosition, &newRecordHeader, RECORD_HEADER_SIZE);
 	cachedFile.write(recordPosition + RECORD_HEADER_SIZE, data, length);
 
@@ -183,7 +186,7 @@ std::shared_ptr<RecordCursor> RecordFileIO::getRecord(uint64_t recordPosition) {
 	// Try to read record header
 	RecordHeader header;
 	uint64_t recPos = readRecordHeader(recordPosition, header);
-	if (recPos == NOT_FOUND || header.bitFlags & RECORD_DELETED_BIT) return nullptr;
+	if (recPos == NOT_FOUND || header.bitFlags & RECORD_DELETED_FLAG) return nullptr;
 
 	// If everything is ok - create cursor and copy to its internal buffer
 	std::shared_ptr<RecordCursor> recordCursor;
@@ -202,12 +205,22 @@ std::shared_ptr<RecordCursor> RecordFileIO::getRecord(uint64_t recordPosition) {
 */
 std::shared_ptr<RecordCursor> RecordFileIO::getFirstRecord() {
 	uint64_t firstPos;
-	{
-		std::shared_lock lock(storageMutex);
-		if (storageHeader.firstRecord == NOT_FOUND) return nullptr;
-		firstPos = storageHeader.firstRecord;
-	}
-	return getRecord(firstPos);
+	
+	// Lock storage
+	std::shared_lock lock(storageMutex);
+	if (storageHeader.firstRecord == NOT_FOUND) return nullptr;
+	firstPos = storageHeader.firstRecord;
+
+	// Try to read record header
+	RecordHeader header;
+	uint64_t recPos = readRecordHeader(firstPos, header);
+	if (recPos == NOT_FOUND || header.bitFlags & RECORD_DELETED_FLAG) return nullptr;
+
+	// If everything is ok - create cursor and copy to its internal buffer
+	std::shared_ptr<RecordCursor> recordCursor;
+	recordCursor = std::make_shared<RecordCursor>(*this, header, firstPos);
+	
+	return recordCursor;
 }
 
 
@@ -219,12 +232,21 @@ std::shared_ptr<RecordCursor> RecordFileIO::getFirstRecord() {
 */
 std::shared_ptr<RecordCursor> RecordFileIO::getLastRecord() {
 	uint64_t lastPos;
-	{
-		std::shared_lock lock(storageMutex);
-		if (storageHeader.lastRecord == NOT_FOUND) return nullptr;
-		lastPos = storageHeader.lastRecord;
-	}
-	return getRecord(lastPos);
+	
+	std::shared_lock lock(storageMutex);
+	if (storageHeader.lastRecord == NOT_FOUND) return nullptr;
+	lastPos = storageHeader.lastRecord;
+
+	// Try to read record header
+	RecordHeader header;
+	uint64_t recPos = readRecordHeader(lastPos, header);
+	if (recPos == NOT_FOUND || header.bitFlags & RECORD_DELETED_FLAG) return nullptr;
+
+	// If everything is ok - create cursor and copy to its internal buffer
+	std::shared_ptr<RecordCursor> recordCursor;
+	recordCursor = std::make_shared<RecordCursor>(*this, header, lastPos);
+
+	return recordCursor;
 }
 
 
@@ -235,19 +257,27 @@ std::shared_ptr<RecordCursor> RecordFileIO::getLastRecord() {
 bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 
 	// FYI: cursor::isValid locks storageMutex so do it before unique lock
-	if (cursor == nullptr || cachedFile.isReadOnly() || !cursor->isValid()) return false;
+	if (cursor == nullptr || cachedFile.isReadOnly()) return false;
 
 	// Lock storage and cursor for exclusive writing
 	std::unique_lock lockStorage(storageMutex);
 	std::unique_lock lockCursor(cursor->cursorMutex);
-	
-	// check siblings
+
+	// Update header and check is it still valid
+	uint64_t pos = readRecordHeader(cursor->currentPosition, cursor->recordHeader);
+	if (pos == NOT_FOUND || cursor->recordHeader.bitFlags & RECORD_DELETED_FLAG) return false;
+				
+	// make shortcuts for code readability
 	RecordHeader& recordHeader = cursor->recordHeader;
 	uint64_t currentPosition = cursor->currentPosition;
-	
-	// make shortcuts for code readability
 	uint64_t leftSiblingOffset = recordHeader.previous;
 	uint64_t rightSiblingOffset = recordHeader.next;
+
+	if (storageHeader.lastRecord == storageHeader.firstFreeRecord) {
+		throw std::runtime_error("Cyclic reference");
+	}
+
+	// check siblings
 	bool leftSiblingExists = (leftSiblingOffset != NOT_FOUND);
 	bool rightSiblingExists = (rightSiblingOffset != NOT_FOUND);
 
@@ -258,8 +288,8 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 
 	if (leftSiblingExists && rightSiblingExists) {  
 		// removing record in the middle
-		readRecordHeader(recordHeader.previous, leftSiblingHeader);
-		readRecordHeader(recordHeader.next, rightSiblingHeader);
+		readRecordHeader(leftSiblingOffset, leftSiblingHeader);
+		readRecordHeader(rightSiblingOffset, rightSiblingHeader);
 		leftSiblingHeader.next = rightSiblingOffset;
 		rightSiblingHeader.previous = leftSiblingOffset;
 		writeRecordHeader(leftSiblingOffset, leftSiblingHeader);
@@ -270,32 +300,39 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 		newCursorRecordHeader = &rightSiblingHeader;
 	} else if (leftSiblingExists) {		             
 		// removing last record
-		readRecordHeader(recordHeader.previous, leftSiblingHeader);
+		readRecordHeader(leftSiblingOffset, leftSiblingHeader);
 		leftSiblingHeader.next = NOT_FOUND;
 		writeRecordHeader(leftSiblingOffset, leftSiblingHeader);
+		// update storage header
+		storageHeader.lastRecord = leftSiblingOffset;
 		// add record to free list and mark as deleted
 		addRecordToFreeList(currentPosition);
-		storageHeader.lastRecord = leftSiblingOffset;
 		newCursorPosition = leftSiblingOffset;
 		newCursorRecordHeader = &leftSiblingHeader;
 	} else if (rightSiblingExists) {		         
 		// removing first record
-		readRecordHeader(recordHeader.next, rightSiblingHeader);
+		readRecordHeader(rightSiblingOffset, rightSiblingHeader);
 		rightSiblingHeader.previous = NOT_FOUND;
 		writeRecordHeader(rightSiblingOffset, rightSiblingHeader);
+		// update storage header
+		storageHeader.firstRecord = rightSiblingOffset;
 		// add record to free list and mark as deleted
 		addRecordToFreeList(currentPosition);
-		storageHeader.firstRecord = rightSiblingOffset;
 		newCursorPosition = rightSiblingOffset;
 		newCursorRecordHeader = &rightSiblingHeader;
 	} else {                                         
-		// add record to free list and mark as deleted
-		addRecordToFreeList(currentPosition);
+		// update storage header
 		storageHeader.firstRecord = NOT_FOUND;
 		storageHeader.lastRecord = NOT_FOUND;
+		// add record to free list and mark as deleted
+		addRecordToFreeList(currentPosition);
 		newCursorPosition = NOT_FOUND;
 		newCursorRecordHeader = nullptr;
 	}
+
+	// Update storage header information about total records number
+	storageHeader.totalRecords--;
+	writeStorageHeader();
 
 	// Update cursor position to the neighbour record	
 	if (newCursorPosition != NOT_FOUND) {
@@ -304,17 +341,16 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 	}
 	else {
 		// invalidate cursor if there is no neighbour records
+		cursor->currentPosition = NOT_FOUND;
+
 		cursor->recordHeader.next = NOT_FOUND;
 		cursor->recordHeader.previous = NOT_FOUND;
 		cursor->recordHeader.dataLength = 0;
 		cursor->recordHeader.dataChecksum = 0;
-		cursor->recordHeader.headChecksum = 0;
-		cursor->currentPosition = NOT_FOUND;
+		cursor->recordHeader.headChecksum = 0;		
 	}
 	
-	// Update storage header information about total records number
-	storageHeader.totalRecords--;
-	writeStorageHeader();
+
 
 	return true;
 }
@@ -360,6 +396,13 @@ void RecordFileIO::createStorageHeader() {
 *  @return true - if succeeded, false - if failed
 */
 bool RecordFileIO::writeStorageHeader() {
+
+	if (storageHeader.lastRecord == storageHeader.firstFreeRecord) {
+		if (storageHeader.lastRecord != NOT_FOUND) {
+			throw std::runtime_error("Cyclic reference");
+		}
+	}
+
 	uint64_t bytesWritten = cachedFile.write(0, &storageHeader, STORAGE_HEADER_SIZE);
 	if (bytesWritten != STORAGE_HEADER_SIZE) return false;
 	return true;
@@ -400,10 +443,10 @@ uint64_t RecordFileIO::readRecordHeader(uint64_t offset, RecordHeader& header) {
 	uint64_t bytesRead = cachedFile.read(offset, &header, RECORD_HEADER_SIZE);
 	if (bytesRead != RECORD_HEADER_SIZE) return NOT_FOUND;
 	
-	// Check data consistency	
+	// Check header consistency	
 	uint32_t expectedChecksum = checksum((uint8_t*)&header, RECORD_HEADER_PAYLOAD_SIZE);
 	if (expectedChecksum != header.headChecksum) return NOT_FOUND;
-	
+
 	return offset;
 }
 
@@ -416,7 +459,7 @@ uint64_t RecordFileIO::readRecordHeader(uint64_t offset, RecordHeader& header) {
 *  @return record offset in file or NOT_FOUND if can't write
 */
 uint64_t RecordFileIO::writeRecordHeader(uint64_t offset, RecordHeader& header) {
-	
+
 	// calculate checksum of header payload	
 	header.headChecksum = checksum((uint8_t*)&header, RECORD_HEADER_PAYLOAD_SIZE);
 
@@ -532,39 +575,46 @@ uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result) 
 
 	// If there are free records
 	RecordHeader freeRecord;	
+
+	// Read storage last record position before it will be changed by free list
+	uint64_t previousRecordPos = storageHeader.lastRecord;
+
 	freeRecord.next = storageHeader.firstFreeRecord;
-	uint64_t offset = freeRecord.next;
+	uint64_t freeRecordOffset = freeRecord.next;        
+
 	uint64_t maximumIterations = std::min(storageHeader.totalFreeRecords, freeLookupDepth);
 	uint64_t iterationCounter = 0;
 	// iterate through free list and check iterations counter
 	while (freeRecord.next != NOT_FOUND && iterationCounter < maximumIterations) {
+
 		// Read next free record header
-		readRecordHeader(offset, freeRecord);
+		readRecordHeader(freeRecordOffset, freeRecord);
 		// if record with requested capacity found
-		if (freeRecord.recordCapacity >= capacity) {
+		if (freeRecord.recordCapacity >= capacity && (freeRecord.bitFlags & RECORD_DELETED_FLAG)) {		
+			
 			// Remove free record from the free list
 			removeRecordFromFreeList(freeRecord);			
 			// update last record to point to new record
-			RecordHeader lastRecord;
-			readRecordHeader(storageHeader.lastRecord, lastRecord);
-			lastRecord.next = offset;			
-			writeRecordHeader(storageHeader.lastRecord, lastRecord);
+			RecordHeader previousRecord;
+			readRecordHeader(previousRecordPos, previousRecord);
+			previousRecord.next = freeRecordOffset;			
+			writeRecordHeader(previousRecordPos, previousRecord);
 			// connect new record with previous
 			result.next = NOT_FOUND;
-			result.previous = storageHeader.lastRecord;
+			result.previous = previousRecordPos;
 			result.recordCapacity = freeRecord.recordCapacity;
 			result.dataLength = 0;
 
 			// turn off "record deleted" bit
-			result.bitFlags = freeRecord.bitFlags & (~RECORD_DELETED_BIT);
+			result.bitFlags = freeRecord.bitFlags & (~RECORD_DELETED_FLAG);
 						
 			// update storage header last record to new record
-			storageHeader.lastRecord = offset;
+			storageHeader.lastRecord = freeRecordOffset;
 			storageHeader.totalRecords++;
 			writeStorageHeader();
-			return offset;
+			return freeRecordOffset;
 		}
-		offset = freeRecord.next;
+		freeRecordOffset = freeRecord.next;
 		iterationCounter++;
 	}
 	return NOT_FOUND;
@@ -583,6 +633,9 @@ bool RecordFileIO::addRecordToFreeList(uint64_t offset) {
 	
 	if (readRecordHeader(offset, newFreeRecord) == NOT_FOUND) return false;
 
+	// Check if already deleted
+	if (newFreeRecord.bitFlags & RECORD_DELETED_FLAG) return false;
+	
 	// Update previous free record to reference next new free record
 	size_t previousFreeRecordOffset = storageHeader.lastFreeRecord;
 	// if free records list is not empty
@@ -603,7 +656,7 @@ bool RecordFileIO::addRecordToFreeList(uint64_t offset) {
 	newFreeRecord.dataLength = 0;
 	newFreeRecord.dataChecksum = 0;
 	// turn on "record deleted" bit
-	newFreeRecord.bitFlags |= RECORD_DELETED_BIT;
+	newFreeRecord.bitFlags |= RECORD_DELETED_FLAG;
 	// Save record header
 	writeRecordHeader(offset, newFreeRecord);
 
@@ -618,6 +671,7 @@ bool RecordFileIO::addRecordToFreeList(uint64_t offset) {
 
 	// save storage header
 	writeStorageHeader();
+
 	return true;
 }
 
@@ -627,6 +681,13 @@ bool RecordFileIO::addRecordToFreeList(uint64_t offset) {
 *  @param[in] freeRecord - header of record to remove from free list
 */
 void RecordFileIO::removeRecordFromFreeList(RecordHeader& freeRecord) {
+
+	if (!(freeRecord.bitFlags & RECORD_DELETED_FLAG)) {
+		std::cerr << "restoring already restored record\n";
+		//return;
+		//throw std::runtime_error("restoring already restored record");
+	}
+
 	// Simplify namings and check
 	uint64_t leftSiblingOffset = freeRecord.previous;
 	uint64_t rightSiblingOffset = freeRecord.next;
@@ -639,8 +700,8 @@ void RecordFileIO::removeRecordFromFreeList(RecordHeader& freeRecord) {
 	// If both of siblings exists then we removing record in the middle
 	if (leftSiblingExists && rightSiblingExists) {		               
 		// If removing in the middle
-		readRecordHeader(freeRecord.previous, leftSiblingHeader);
-		readRecordHeader(freeRecord.next, rightSiblingHeader);
+		readRecordHeader(leftSiblingOffset, leftSiblingHeader);
+		readRecordHeader(rightSiblingOffset, rightSiblingHeader);
 		leftSiblingHeader.next = rightSiblingOffset;
 		rightSiblingHeader.previous = leftSiblingOffset;
 		writeRecordHeader(leftSiblingOffset, leftSiblingHeader);
@@ -648,14 +709,14 @@ void RecordFileIO::removeRecordFromFreeList(RecordHeader& freeRecord) {
 	}   // if left sibling exists and right is not
 	else if (leftSiblingExists) {                                    
 		// if removing last free record
-		readRecordHeader(freeRecord.previous, leftSiblingHeader);
+		readRecordHeader(leftSiblingOffset, leftSiblingHeader);
 		leftSiblingHeader.next = NOT_FOUND;
 		writeRecordHeader(leftSiblingOffset, leftSiblingHeader);
 		storageHeader.lastFreeRecord = leftSiblingOffset;
 	}   // if right sibling exists and left is not
 	else if (rightSiblingExists) {                                   
 		// if removing first free record
-		readRecordHeader(freeRecord.next, rightSiblingHeader);
+		readRecordHeader(rightSiblingOffset, rightSiblingHeader);
 		rightSiblingHeader.previous = NOT_FOUND;
 		writeRecordHeader(rightSiblingOffset, rightSiblingHeader);
 		storageHeader.firstFreeRecord = rightSiblingOffset;

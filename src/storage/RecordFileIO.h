@@ -33,7 +33,7 @@ namespace Cloudless {
 		//----------------------------------------------------------------------------
 		constexpr uint32_t KNOWLEDGE_SIGNATURE = 0x574F4E4B;   // KNOW signature
 		constexpr uint32_t KNOWLEDGE_VERSION   = 0x00000001;   // Version 1
-		constexpr uint64_t RECORD_DELETED_BIT  = 1ULL << 63;   // Highest bit
+		constexpr uint64_t RECORD_DELETED_FLAG = 1ULL << 63;   // Highest bit
 
 		//----------------------------------------------------------------------------
 		// Knowledge Storage header structure (64 bytes)

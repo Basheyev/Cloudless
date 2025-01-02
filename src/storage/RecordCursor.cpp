@@ -40,26 +40,24 @@ RecordCursor::RecordCursor(RecordFileIO& rf, RecordHeader& header, uint64_t posi
 *  @returns true if valid, false otherwise
 */
 bool RecordCursor::isValid() {
-	// Check if cursor invalidated after record deletion
-	{
-		std::shared_lock lock(cursorMutex);
-		if (currentPosition == NOT_FOUND) return false;
-	}
-
 	// Sample record header
 	RecordHeader recordSample;
 	uint64_t samplePosition;
 	{
-		std::shared_lock lock(recordFile.storageMutex);
+		std::shared_lock lockCursor(cursorMutex);
+		// Check if cursor invalidated after record deletion
+		if (currentPosition == NOT_FOUND) return false;
+		// Make sure atomic read
+		std::shared_lock lockStorage(recordFile.storageMutex);
 		samplePosition = recordFile.readRecordHeader(currentPosition, recordSample);
 	}
 	// Lock for reading check conditions 
-	std::shared_lock lock(cursorMutex);
+	std::shared_lock lockCursor(cursorMutex);
 	bool invalid =
 		// Record is corrupt
 		(samplePosition == NOT_FOUND) ||
 		// Record is deleted
-		(recordSample.bitFlags & RECORD_DELETED_BIT) ||
+		(recordSample.bitFlags & RECORD_DELETED_FLAG) ||
 		// Record has been changed
 		(recordSample.headChecksum != recordHeader.headChecksum);
 	
@@ -89,11 +87,9 @@ bool RecordCursor::setPosition(uint64_t offset) {
 	RecordHeader header;
 	{
 		std::shared_lock lock(recordFile.storageMutex);
-		if (recordFile.readRecordHeader(offset, header) == NOT_FOUND) return false;
+		uint64_t recPos = recordFile.readRecordHeader(offset, header);
+		if (recPos == NOT_FOUND || header.bitFlags & RECORD_DELETED_FLAG) return false;
 	}
-
-	// Check if deleted
-	if (header.bitFlags & RECORD_DELETED_BIT) return false;
 	
 	// Copy to internal buffer
 	{
@@ -115,6 +111,11 @@ bool RecordCursor::next() {
 		std::shared_lock lock(cursorMutex);
 		if (currentPosition == NOT_FOUND || recordHeader.next == NOT_FOUND) return false;		
 		nextPos = recordHeader.next;
+		{
+			// check if we reached the last record
+			std::shared_lock storageLock(recordFile.storageMutex);
+			if (currentPosition == recordFile.storageHeader.lastRecord) return false;
+		}
 	}
 	return setPosition(nextPos);
 }
@@ -128,10 +129,15 @@ bool RecordCursor::next() {
 bool RecordCursor::previous() {
 	uint64_t prevPos;
 	{
-		std::shared_lock lock(cursorMutex);
-		if (currentPosition == NOT_FOUND || recordHeader.previous == NOT_FOUND) return false;		
+		std::shared_lock lock(cursorMutex);		
+		if (currentPosition == NOT_FOUND || recordHeader.previous == NOT_FOUND) return false;
 		prevPos = recordHeader.previous;
-	}
+		{
+			// check if we reached the first record
+			std::shared_lock storageLock(recordFile.storageMutex);
+			if (currentPosition == recordFile.storageHeader.firstRecord) return false;
+		}
+	}	
 	return setPosition(prevPos);
 }
 

@@ -22,14 +22,14 @@ std::string TestRecordFileIO::getName() const {
 
 void TestRecordFileIO::init() {
 	fileName = (char*)"records.bin";
-	samplesCount = 1000;
+	samplesCount = 1000000;
 
 	// Functional test
 	if (std::filesystem::exists(fileName)) {
 		std::filesystem::remove(fileName);
 	}
 	
-	if (!cachedFile.open(fileName, false)) {
+	if (!cachedFile.open(fileName, false, 16 * samplesCount)) {
 		std::cout << "ERROR: Can't open file '" << fileName << "' in write mode.\n";
 		return;
 	}
@@ -91,9 +91,9 @@ bool TestRecordFileIO::multithreaded() {
 					std::cout << "\tStarting thread #" << i << " started\n";
 				}
 				generateData(batchSize);
-				readAscending(false);
-				removeEvenRecords(false);
 				readDescending(false);
+				removeEvenRecords(false);
+				readAscending(false);				
 				insertNewRecords(batchSize / 2);
 			});
 		}
@@ -202,9 +202,8 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 			std::cout << "Data: '" << buffer << "'\n\n";
 		}
 		counter++;
-		// TODO: check data corrpution and cycles references in file records
 
-	} while (cursor->next() /* && counter <= samplesCount*/);
+	} while (cursor->next());
 	auto endTime = std::chrono::high_resolution_clock::now();	
 	double duration = (endTime - startTime).count() / 1000000000.0;
 	double throughput = (bytesRead / 1024.0 / 1024.0) / duration;
@@ -235,7 +234,7 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 	char* buffer = new char[65536];
 	bool result = true;
 
-	std::unordered_map<uint64_t, uint64_t> IDs;
+	//std::unordered_map<uint64_t, uint64_t> IDs;
 
 	do {
 		uint64_t pos = cursor->getPosition();
@@ -252,14 +251,14 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 			break;
 		}
 		else {
-			if (IDs.find(pos) == IDs.end()) {
+			/*if (IDs.find(pos) == IDs.end()) {
 				IDs[pos] = counter;
 			}
 			else {
 				std::unique_lock lock(outputLock);
 				std::cerr << "\n\nDUPLICATES IN TRAVERSAL!!!\n" << "Record ID=" << IDs[pos] << " repeats at=" << counter << "\n";
 				break;
-			}
+			}*/
 		}
 		buffer[length] = 0;
 		if (verbose) {
@@ -273,12 +272,14 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 		}
 		// some how this exceeds records count but still in the loop!?
 		counter++;
-		if (counter >= db->getTotalRecords()) {
+		/*uint64_t total = db->getTotalRecords();
+		if (counter > total || pos == prev) {
 			std::unique_lock lock(outputLock);
-			std::cerr << "Counter exceeds number of total records - CYCLIC REFERENCE!!!\n\n";
-			break;
-		}
-	} while (cursor->previous() /* && counter <= samplesCount*/);
+			std::cerr << "\n\nCYCLIC REFERENCE!!! counter " << counter << " is more than Total=" << total << "\n";
+			std::cerr << "Record=" << pos << " prev=" << prev << " next=" << next << "\n\n";
+			//break;
+		}*/
+	} while (cursor->previous());
 
 	delete[] buffer;
 	{
@@ -326,7 +327,7 @@ bool TestRecordFileIO::removeEvenRecords(bool verbose) {
 		}
 		db->removeRecord(cursor);
 		counter++;		
-	} while (cursor->next() /* && counter < samplesCount*/);
+	} while (cursor->next());
 	auto endTime = std::chrono::high_resolution_clock::now();	
 	auto duration = (endTime - startTime).count() / 1000000000.0;
 
