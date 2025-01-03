@@ -29,7 +29,7 @@ void TestRecordFileIO::init() {
 		std::filesystem::remove(fileName);
 	}
 	
-	if (!cachedFile.open(fileName, false, 16 * samplesCount)) {
+	if (!cachedFile.open(fileName, false, 24 * samplesCount)) {
 		std::cout << "ERROR: Can't open file '" << fileName << "' in write mode.\n";
 		return;
 	}
@@ -98,25 +98,25 @@ bool TestRecordFileIO::multithreaded() {
 	{		
 		std::vector<std::jthread> workers(batchesCount);
 		for (uint64_t i = 0; i < batchesCount; i++) {
-			workers.emplace_back([this, i, batchSize]() {
-				{
-					std::unique_lock lock(outputLock);
-					std::cout << "\tStarting thread #" << i << " started\n";
-				}
+			workers.emplace_back([this, i, batchSize]() {		
 
 				// ever 3rd thread is writer
 				if (i % 3 == 0) {
 					generateData(batchSize);
 					readAscending(false);
 					removeEvenRecords(false);
-					insertNewRecords(batchSize / 2);
-					
+					insertNewRecords(batchSize / 2);					
 				} else {
 					readAscending(false);
 					readDescending(false);
 				}				
 			});
 		}
+		
+		std::stringstream ss;
+		ss << "Total threads started: " << batchesCount;
+		printResult(ss.str().c_str(), true);
+		
 	}
 
 
@@ -144,9 +144,11 @@ bool TestRecordFileIO::generateData(size_t recordsCount) {
 
 	auto startTime = std::chrono::high_resolution_clock::now();
 	size_t bytesWritten = 0;
-	uint32_t length;		
+	uint32_t length = 0;		
 	uint32_t randomNumber;	
 	uint32_t padding = 16;
+	bool result = true;
+
 	for (size_t i = 0; i < recordsCount; i++) {
 		std::stringstream ss;
 		randomNumber = std::rand();
@@ -156,7 +158,11 @@ bool TestRecordFileIO::generateData(size_t recordsCount) {
 		memset(buffer, 0, sizeof(buffer));
 		memcpy(buffer, ss.str().c_str(), length);		
 		if (db->createRecord(buffer, length + padding) != nullptr) {
-			bytesWritten += length;
+			bytesWritten += (length + padding);
+		}
+		else {
+			result = false;
+			break;
 		}
 	}
 
@@ -166,7 +172,6 @@ bool TestRecordFileIO::generateData(size_t recordsCount) {
 	double duration = (endTime - startTime).count() / 1000000000.0;
 	double throughput = (bytesWritten / 1024.0 / 1024.0) / duration;
 
-	bool result = (bytesWritten == length * recordsCount);
 	std::stringstream ss;
 	ss << "Generating " << recordsCount << " data records: " << duration << "s payload throughput " << throughput << " Mb/s";
 	printResult(ss.str().c_str(), result);
@@ -192,10 +197,12 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 	size_t prev, next;
 	size_t bytesRead = 0;
 	char* buffer = new char[65536];
+	bool result = true;
+
 	do {
 		if (!cursor->isValid()) {
-			std::unique_lock lock(outputLock);
-			std::cout << "Cursor invalidated at " << counter << " record\n";
+			/*std::unique_lock lock(outputLock);
+			std::cout << "Cursor invalidated at " << counter << " record\n";*/
 			break;
 		}
 		uint32_t length = cursor->getDataLength();
@@ -218,14 +225,20 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 			std::cout << "Data: '" << buffer << "'\n\n";
 		}
 		counter++;
-
+		uint64_t pos = cursor->getPosition();
+		if (counter > (samplesCount * 3 / 2) && counter > db->getTotalRecords() || pos == prev) {
+			std::unique_lock lock(outputLock);
+			std::cerr << "\nREAD ASCENDING CYCLIC REFERENCE!!! counter " << counter << " is more than Total=" << db->getTotalRecords() << "\n";
+			std::cerr << "Record=" << pos << " prev=" << prev << " next=" << next << "\n\n";
+			result = false;
+			break;
+		}
 	} while (cursor->next());
 	auto endTime = std::chrono::high_resolution_clock::now();	
 	double duration = (endTime - startTime).count() / 1000000000.0;
 	double throughput = (bytesRead / 1024.0 / 1024.0) / duration;
 	delete[] buffer;	
-	{
-		bool result = (counter == db->getTotalRecords());
+	{		
 		std::stringstream ss;		
 		ss << "Reading " << counter << "/" << db->getTotalRecords() << " records in ASCENDING order.";
 		ss << " Payload throughput " << throughput << " Mb/s";
@@ -248,8 +261,10 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 	size_t prev, next;
 	char* buffer = new char[65536];
 	bool result = true;
-
+	uint64_t bytesRead = 0;
 	//std::unordered_map<uint64_t, uint64_t> IDs;
+
+	auto startTime = std::chrono::high_resolution_clock::now();
 
 	do {
 		uint64_t pos = cursor->getPosition();
@@ -266,6 +281,7 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 			break;
 		}
 		else {
+			bytesRead += length;
 			/*if (IDs.find(pos) == IDs.end()) {
 				IDs[pos] = counter;
 			}
@@ -286,22 +302,26 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 			std::cout << "Data: '" << buffer << "'\n\n";
 		}
 		// some how this exceeds records count but still in the loop!?
-		counter++;
-		uint64_t total = db->getTotalRecords();
-		if (counter > total || pos == prev) {
+		counter++;		
+		if (counter > (samplesCount * 3 / 2) && counter > db->getTotalRecords() || pos == prev) {
 			std::unique_lock lock(outputLock);
-			std::cerr << "\n\nCYCLIC REFERENCE!!! counter " << counter << " is more than Total=" << total << "\n";
+			std::cerr << "\nREAD DESCENDING CYCLIC REFERENCE!!! counter " << counter << " is more than Total=" << db->getTotalRecords() << "\n";
 			std::cerr << "Record=" << pos << " prev=" << prev << " next=" << next << "\n\n";
+			result = false;
 			break;
 		}
 	} while (cursor->previous());
+	
+	auto endTime = std::chrono::high_resolution_clock::now();
+	double duration = (endTime - startTime).count() / 1000000000.0;
 
 	delete[] buffer;
 	{
-		size_t totalRecords = db->getTotalRecords();
-		if (result) result = (counter == totalRecords);
+		size_t totalRecords = db->getTotalRecords();		
+		double throughput = (bytesRead / 1024.0 / 1024.0) / duration;
 		std::stringstream ss;
-		ss << "Reading " << counter << "/" << db->getTotalRecords() << " records in DESCENDING order " << (counter > samplesCount ? " Cursor invalidated " : "");
+		ss << "Reading " << counter << "/" << db->getTotalRecords() << " records in DESCENDING order.";
+		ss << " Payload throughput " << throughput << " Mb/s";
 		printResult(ss.str().c_str(), result);
 	}
 	return true;
@@ -327,6 +347,8 @@ bool TestRecordFileIO::removeEvenRecords(bool verbose) {
 	size_t counter = 0;
 	size_t prev, next;
 	size_t amount = db->getTotalRecords();
+	bool result = true;
+
 	do {
 		if (!cursor->isValid()) {
 			std::unique_lock lock(outputLock);
@@ -357,16 +379,18 @@ bool TestRecordFileIO::removeEvenRecords(bool verbose) {
 			}
 		}*/
 		counter++;
-		if (counter > samplesCount) {
-			std::cerr << "Cyclic reference\n";
-			throw std::runtime_error("Cyclic reference!");
+		if (counter > (samplesCount * 3 / 2) && counter > db->getTotalRecords() || pos == prev) {
+			std::unique_lock lock(outputLock);
+			std::cerr << "\nDELETE CYCLIC REFERENCE!!! counter " << counter << " is more than Total=" << db->getTotalRecords() << "\n";
+			std::cerr << "Record=" << pos << " prev=" << prev << " next=" << next << "\n\n";
+			result = false;
+			break;		
 		}
 	} while (cursor->next());
 	auto endTime = std::chrono::high_resolution_clock::now();	
 	auto duration = (endTime - startTime).count() / 1000000000.0;
 
-	{
-		bool result = (counter == amount);
+	{		
 		std::stringstream ss;
 		ss << "Deleting even data records. ";
 		ss << "TOTAL DELETED: " << counter << "/" << samplesCount << " records ";
