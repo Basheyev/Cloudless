@@ -22,7 +22,7 @@ std::string TestRecordFileIO::getName() const {
 
 void TestRecordFileIO::init() {
 	fileName = (char*)"records.bin";
-	samplesCount = 1000000;
+	samplesCount = 10000;
 
 	// Functional test
 	if (std::filesystem::exists(fileName)) {
@@ -40,13 +40,8 @@ void TestRecordFileIO::init() {
 
 void TestRecordFileIO::execute() {
 		
-	generateData(samplesCount);
-	readAscending(false);
-	removeEvenRecords(false);
-	readDescending(false);
-	insertNewRecords(samplesCount / 2);
-	readAscending(false);
 
+	singlethreaded();
 	multithreaded();
 
 	std::stringstream ss;
@@ -72,6 +67,24 @@ void TestRecordFileIO::cleanup() {
 
 //------------------------------------------------------------------------------------------------------------------
 
+bool TestRecordFileIO::singlethreaded() {
+	auto startTime = std::chrono::high_resolution_clock::now();
+	generateData(samplesCount);
+	readAscending(false);
+	removeEvenRecords(false);
+	readDescending(false);
+	insertNewRecords(samplesCount / 2);
+	readAscending(false);
+	auto endTime = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime);
+	double durationInSeconds = duration.count() / 1000000000.0;
+	
+	bool result = true;
+	std::stringstream ss;
+	ss << "SINGLE THREAD test completed in  " << durationInSeconds << " s (Samples: " << samplesCount << ")";
+	printResult(ss.str().c_str(), result);
+	return result;
+}
 
 
 bool TestRecordFileIO::multithreaded() {
@@ -90,11 +103,18 @@ bool TestRecordFileIO::multithreaded() {
 					std::unique_lock lock(outputLock);
 					std::cout << "\tStarting thread #" << i << " started\n";
 				}
-				generateData(batchSize);
-				readDescending(false);
-				removeEvenRecords(false);
-				readAscending(false);				
-				insertNewRecords(batchSize / 2);
+
+				// ever 3rd thread is writer
+				if (i % 3 == 0) {
+					generateData(batchSize);
+					readAscending(false);
+					removeEvenRecords(false);
+					insertNewRecords(batchSize / 2);
+					
+				} else {
+					readAscending(false);
+					readDescending(false);
+				}				
 			});
 		}
 	}
@@ -102,17 +122,13 @@ bool TestRecordFileIO::multithreaded() {
 
 	auto endTime = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime);
-	double cachedDuration = duration.count() / 1000000000.0;
+	double durationInSeconds = duration.count() / 1000000000.0;
 	//double throughput = (bytesWritten / (1024.0 * 1024.0)) / (cachedDuration / 1000.0);
 
 	bool result = true;
 	std::stringstream ss;
-	ss << "Concurrent tests " << cachedDuration << " s \n";
-	{
-		std::unique_lock lock(outputLock);
-		printResult(ss.str().c_str(), result);
-	}
-
+	ss << "MULTITHREAD test completed in  " << durationInSeconds << " s (Threads:" << batchesCount << ", Batch size: " << batchSize << ")";
+	printResult(ss.str().c_str(), result);
 	return true;
 }
 
@@ -211,9 +227,8 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 	{
 		bool result = (counter == db->getTotalRecords());
 		std::stringstream ss;		
-		ss << "Reading " << counter << "/" << db->getTotalRecords() << " records in ASCENDING order ";
-		ss << "in " << duration << "s";
-		ss << " payload throughput " << throughput << " Mb/s";
+		ss << "Reading " << counter << "/" << db->getTotalRecords() << " records in ASCENDING order.";
+		ss << " Payload throughput " << throughput << " Mb/s";
 		printResult(ss.str().c_str(), result);
 	}
 	return true;
@@ -272,13 +287,13 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 		}
 		// some how this exceeds records count but still in the loop!?
 		counter++;
-		/*uint64_t total = db->getTotalRecords();
+		uint64_t total = db->getTotalRecords();
 		if (counter > total || pos == prev) {
 			std::unique_lock lock(outputLock);
 			std::cerr << "\n\nCYCLIC REFERENCE!!! counter " << counter << " is more than Total=" << total << "\n";
 			std::cerr << "Record=" << pos << " prev=" << prev << " next=" << next << "\n\n";
-			//break;
-		}*/
+			break;
+		}
 	} while (cursor->previous());
 
 	delete[] buffer;
@@ -300,6 +315,10 @@ bool TestRecordFileIO::removeEvenRecords(bool verbose) {
 		
 		if (verbose) std::cout << "-----------------------------------------------------------\n\n";
 	}
+
+	std::unordered_map<uint64_t, uint64_t> IDs;
+
+
 	auto startTime = std::chrono::high_resolution_clock::now();
 	
 	auto cursor = db->getFirstRecord();
@@ -325,8 +344,23 @@ bool TestRecordFileIO::removeEvenRecords(bool verbose) {
 			std::cout << " Length: " << cursor->getDataLength();
 			std::cout << " - DELETED \n";
 		}
+		uint64_t pos = cursor->getPosition();
 		db->removeRecord(cursor);
-		counter++;		
+		/*if (db->removeRecord(cursor)) {
+			if (IDs.find(pos) == IDs.end()) {
+				IDs[pos] = counter;
+			}
+			else {
+				std::unique_lock lock(outputLock);
+				std::cerr << "\n\nDUPLICATES IN TRAVERSAL!!!\n" << "Record ID=" << IDs[pos] << " repeats at=" << counter << "\n";
+				break;
+			}
+		}*/
+		counter++;
+		if (counter > samplesCount) {
+			std::cerr << "Cyclic reference\n";
+			throw std::runtime_error("Cyclic reference!");
+		}
 	} while (cursor->next());
 	auto endTime = std::chrono::high_resolution_clock::now();	
 	auto duration = (endTime - startTime).count() / 1000000000.0;

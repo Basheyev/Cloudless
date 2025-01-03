@@ -20,12 +20,13 @@ namespace Cloudless {
 			bool verify() const override;
 			void cleanup() override;
 		private:
+			bool singlethreaded();
+			bool multithreaded();
 			bool generateData(size_t recordCount);
 			bool readAscending(bool verbose);
 			bool readDescending(bool verbose);
 			bool removeEvenRecords(bool verbose);
-			bool insertNewRecords(size_t recordCount);
-			bool multithreaded();
+			bool insertNewRecords(size_t recordCount);			
 
 			char* fileName;
 			size_t samplesCount;
