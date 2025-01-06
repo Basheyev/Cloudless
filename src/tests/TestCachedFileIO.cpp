@@ -39,16 +39,16 @@ void TestCachedFileIO::execute() {
 	const char* message1 = "This is an initial message!";
 	const char* message2 = "This is different message to overwrite!";
 	const uint64_t messageLength = strlen(message1);
-	const long long cycles = 1000000;
+	//const long long cycles = 1000000;
 
 	testfileOpen(true);
-	testReverseWrites(cycles, message1);
-	testSequentialReads(cycles, message1);
+	testReverseWrites(samplesCount, message1);
+	testSequentialReads(samplesCount, message1);
 	testIOAfterClose();
 	testfileOpen(false);
-	testSequentialWrites(cycles, message2);
-	testSequentialReads(cycles, message2);
-	testFileSize(cycles * strlen(message2));
+	testSequentialWrites(samplesCount, message2);
+	testSequentialReads(samplesCount, message2);
+	testFileSize(samplesCount * strlen(message2));
 	testRandomMultithreadWrites();
 	double cachedThroughput = testRandomMultithreadReads();
 	double stdioThroughput = stdioRandomReads();

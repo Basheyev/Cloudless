@@ -139,7 +139,7 @@ bool BinaryDirectIO::flush() {
 *  @brief Checks if file is open
 *  @return true - if file open, false - otherwise
 */
-bool BinaryDirectIO::isOpen() {
+bool BinaryDirectIO::isOpen() const {
 #ifdef _WIN32
     return fileHandle != INVALID_HANDLE_VALUE;
 #else

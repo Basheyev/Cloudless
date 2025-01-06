@@ -38,7 +38,7 @@ int main()
 	ct.addTestCase(&cfiot);
 	//ct.addTestCase(&rfiot);
 
-	std::filesystem::current_path("D:/");
+	std::filesystem::current_path("F:/");
 
 	ct.run();
 		

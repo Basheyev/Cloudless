@@ -113,7 +113,7 @@ namespace Cloudless {
 			size_t writePage(size_t pageNo, const CachePageData* pageBuffer);
 			size_t size();
 			bool flush();
-			bool isOpen();
+			bool isOpen() const;
 			bool close();			
 		private:
 #ifdef _WIN32
@@ -136,8 +136,8 @@ namespace Cloudless {
 
 			bool open(const char* path, bool readOnly = false, size_t cache = DEFAULT_CACHE);
 			bool close();
-			bool isOpen();
-			bool isReadOnly();
+			bool isOpen() const;
+			bool isReadOnly() const;
 
 			size_t read(size_t position, void* dataBuffer, size_t length);
 			size_t write(size_t position, const void* dataBuffer, size_t length);

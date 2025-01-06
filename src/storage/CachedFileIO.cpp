@@ -116,8 +116,8 @@ bool CachedFileIO::close() {
 *  @brief Checks if file is open
 *  @return true - if file open, false - otherwise
 */
-bool CachedFileIO::isOpen() {
-	std::lock_guard lock(fileMutex);
+bool CachedFileIO::isOpen() const {
+	//std::lock_guard lock(fileMutex);
 	return file.isOpen();
 }
 
@@ -127,7 +127,7 @@ bool CachedFileIO::isOpen() {
 *  @brief Checks if file is read only
 *  @return true - if file is read only, false - otherwise
 */
-bool CachedFileIO::isReadOnly() {
+bool CachedFileIO::isReadOnly() const {
 	return readOnly.load();
 }
 
