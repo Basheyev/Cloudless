@@ -624,8 +624,9 @@ CachePage* CachedFileIO::searchPageInCache(size_t filePageNo) {
 		// if page found in cache
 		if (result != cacheMap.end()) {               // Move page to the front of list (LRU):
 			CachePage* cachePage = result->second;    // 1) Get page pointer
-			cacheList.erase(cachePage->it);           // 2) Erase page from list by iterator
-			cacheList.push_front(cachePage);          // 3) Push page in the front of the list
+		//	cacheList.erase(cachePage->it);           // 2) Erase page from list by iterator
+		//	cacheList.push_front(cachePage);          // 3) Push page in the front of the list
+			cacheList.splice(cacheList.begin(), cacheList, cachePage->it);
 			cachePage->it = cacheList.begin();        // 4) update page's list iterator 
 			return cachePage;                         // 5) return page (hashmap pointer is valid)
 		}
