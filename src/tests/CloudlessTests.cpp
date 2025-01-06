@@ -35,10 +35,10 @@ int main()
 	TestCachedFileIO cfiot;
 	TestRecordFileIO rfiot;
 
-	//ct.addTestCase(&cfiot);
-	ct.addTestCase(&rfiot);
+	ct.addTestCase(&cfiot);
+	//ct.addTestCase(&rfiot);
 
-	std::filesystem::current_path("F:/");
+	std::filesystem::current_path("D:/");
 
 	ct.run();
 		

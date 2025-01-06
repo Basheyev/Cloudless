@@ -31,9 +31,7 @@
 using namespace Cloudless::Storage;
 
 /**
-*
 * @brief Constructor
-*
 */
 CachedFileIO::CachedFileIO() {
 	this->readOnly.store(false);
@@ -46,9 +44,7 @@ CachedFileIO::CachedFileIO() {
 
 
 /**
-* 
 * @brief Destructor closes file if it still open
-* 
 */
 CachedFileIO::~CachedFileIO() {
 	this->close();
@@ -56,15 +52,11 @@ CachedFileIO::~CachedFileIO() {
 
 
 /**
-*
 *  @brief Opens file and allocates cache memory
-* 
 *  @param[in] fileName   - the name of the file to be opened (path)
 *  @param[in] cacheSize  - how much memory for cache to allocate (bytes) 
 *  @param[in] isReadOnly - if true, write operations are not allowed
-*
 *  @return true if file opened, false if can't open file
-*
 */
 bool CachedFileIO::open(const char* path, bool isReadOnly, size_t cacheSize) {
 	
@@ -74,29 +66,15 @@ bool CachedFileIO::open(const char* path, bool isReadOnly, size_t cacheSize) {
 	// if current file still open, close it
 	if (isOpen()) close();	
 
-	// If file is not exists
-	if (!std::filesystem::exists(path)) {
-		// if in read only mode then fail
-		if (isReadOnly) return false;
-		// if in write mode - create new file
-		std::ofstream newFile(path);
-		if (!newFile.is_open()) return false;
-		newFile.close();
-	}
-		
-	// Open file in required mode
-	auto openMode = std::ios::binary | std::ios::in | (isReadOnly ? 0 : std::ios::out);
 	{
 		// Lock file mutex in synchronized section
-		std::lock_guard lock(fileMutex);
+		std::lock_guard lock(fileMutex);		
 		// Try to open existing file for binary read/update 
-		auto result = this->fileHandler.open(path, openMode);		
-		if (result == nullptr) return false;
-		// Set mode to no buffering, we will manage caching by our selves
-		this->fileHandler.pubsetbuf(nullptr, 0);
-		// Set readOnly flag (atomic)
-		this->readOnly.store(isReadOnly);
+		if (!file.open(path, isReadOnly)) return false;
 	}
+
+	// Set readOnly flag (atomic)
+	this->readOnly.store(isReadOnly);
 		
 	// Allocated cache
 	if (setCacheSize(cacheSize) == NOT_FOUND) {
@@ -114,11 +92,8 @@ bool CachedFileIO::open(const char* path, bool isReadOnly, size_t cacheSize) {
 
 
 /**
-*
 *  @brief Closes file, persists changed pages and releases cache memory
-*
 *  @return true if file correctly closed, false if file has not been opened
-*
 */
 bool CachedFileIO::close() {
 	// check if file was opened
@@ -129,7 +104,7 @@ bool CachedFileIO::close() {
 	{
 		// Lock file mutex in synchronized section
 		std::lock_guard lock(fileMutex);
-		this->fileHandler.close();
+		file.close();
 	}
 	// Release memory pool of cached pages
 	this->releasePool();		
@@ -138,25 +113,19 @@ bool CachedFileIO::close() {
 
 
 /**
-*
 *  @brief Checks if file is open
-*
 *  @return true - if file open, false - otherwise
-*
 */
 bool CachedFileIO::isOpen() {
 	std::lock_guard lock(fileMutex);
-	return fileHandler.is_open();
+	return file.isOpen();
 }
 
 
 
 /**
-*
 *  @brief Checks if file is read only
-*
 *  @return true - if file is read only, false - otherwise
-*
 */
 bool CachedFileIO::isReadOnly() {
 	return readOnly.load();
@@ -165,15 +134,11 @@ bool CachedFileIO::isReadOnly() {
 
 
 /**
-* 
 *  @brief Read data from cached file
-* 
 *  @param[in]  position   - offset from beginning of the file
 *  @param[out] dataBuffer - data buffer where data copied
 *  @param[in]  length     - data amount to read
-* 
 *  @return total bytes amount actually read to the data buffer
-* 
 */
 size_t CachedFileIO::read(size_t position, void* dataBuffer, size_t length) {
 
@@ -250,15 +215,11 @@ size_t CachedFileIO::read(size_t position, void* dataBuffer, size_t length) {
 
 
 /**
-*
 *  @brief Writes data to cached file
-*
 *  @param[in]  position   - offset from beginning of the file
 *  @param[in]  dataBuffer - data buffer with write data
 *  @param[in]  length     - data amount to write
-*
 *  @return total bytes amount written to the cached file
-*
 */
 size_t CachedFileIO::write(size_t position, const void* dataBuffer, size_t length) {
 
@@ -333,14 +294,10 @@ size_t CachedFileIO::write(size_t position, const void* dataBuffer, size_t lengt
 
 
 /**
-*
 *  @brief Read page from cached file to user buffer
-*
 *  @param[in]  pageNo - file page number
 *  @param[out] userPageBuffer - data buffer (Boson::PAGE_SIZE)
-*
 *  @return total bytes amount actually read to the data buffer
-*
 */
 size_t CachedFileIO::readPage(size_t pageNo, void* userPageBuffer) {
 
@@ -363,15 +320,11 @@ size_t CachedFileIO::readPage(size_t pageNo, void* userPageBuffer) {
 
 
 /**
-*
 *  @brief Writes page from user buffer to cached file
-*
 *  @param[in]  pageNo     - page number to write
 *  @param[in]  dataBuffer - data buffer with write data
 *  @param[in]  length     - data amount to write
-*
 *  @return total bytes amount written to the cached file
-*
 */
 size_t CachedFileIO::writePage(size_t pageNo, const void* userPageBuffer) {
 	
@@ -397,11 +350,8 @@ size_t CachedFileIO::writePage(size_t pageNo, const void* userPageBuffer) {
 
 
 /**
-* 
 *  @brief Persists all changed cache pages to storage device
-* 
 *  @return true if all changed cache pages been persisted, false otherwise
-* 
 */
 bool CachedFileIO::flush() {
 
@@ -427,6 +377,9 @@ bool CachedFileIO::flush() {
 			}
 		}
 	}
+
+	// Flush buffers to storage device
+	file.flush();
 
 	return allDirtyPagesPersisted;
 
@@ -484,19 +437,13 @@ double CachedFileIO::getStats(CachedFileStats type) {
 
 
 /**
-*
 *  @brief Get current file data size
-*
 *  @return actual file data size in bytes
-*
 */
 size_t CachedFileIO::getFileSize() {
 	if (!isOpen()) return 0;
 	std::lock_guard lock(fileMutex);
-	size_t currentPosition = fileHandler.pubseekoff(0, std::ios_base::cur, std::ios_base::in); 	
-	size_t fileSize = fileHandler.pubseekoff(0, std::ios_base::end, std::ios_base::in); 	
-	fileHandler.pubseekpos(currentPosition, std::ios_base::in);
-	return fileSize;
+	return file.size();
 }
 
 
@@ -509,10 +456,8 @@ size_t CachedFileIO::getFileSize() {
 //=============================================================================
 
 /**
-*
 *  @brief Get cache size in bytes
 *  @return actual cache size in bytes
-*
 */
 size_t CachedFileIO::getCacheSize() {
 	return this->maxPagesCount.load() * PAGE_SIZE;
@@ -521,11 +466,9 @@ size_t CachedFileIO::getCacheSize() {
 
 
 /**
-*
 *  @brief Resize cache at runtime: releases memory and allocate new one
 *  @param cacheSize - new cache size
 *  @return actual cache size in bytes or NOT_FOUND and closes file if failed to allocate
-*
 */
 size_t CachedFileIO::setCacheSize(size_t cacheSize) {
 
@@ -617,10 +560,8 @@ CachePage* CachedFileIO::allocatePage() {
 
 
 /**
-*
 * @brief Returns free page: allocates new or return most aged cache page if page limit reached
 * @return new allocated or most aged CachePage pointer
-*
 */
 CachePage* CachedFileIO::getFreeCachePage() {
 	
@@ -644,7 +585,7 @@ CachePage* CachedFileIO::getFreeCachePage() {
 		if (freePage->state == PageState::DIRTY) {
 			// there is page lock inside so do not lock here
 			if (!persistCachePage(freePage)) {
-				throw std::ios_base::failure("Can't persist cache page to the drive");
+				throw std::ios_base::failure("Can't persist cache page to the storage device");
 			}			
 		}
 
@@ -664,12 +605,9 @@ CachePage* CachedFileIO::getFreeCachePage() {
 
 
 /**
-* 
 * @brief Lookup cache page of requested file page if it exists or loads from storage
-* 
 * @param requestedFilePageNo - requested file page number
 * @return cache page reference of requested file page or returns nullptr
-* 
 */
 CachePage* CachedFileIO::searchPageInCache(size_t filePageNo) {	
 	
@@ -702,12 +640,9 @@ CachePage* CachedFileIO::searchPageInCache(size_t filePageNo) {
 
 
 /**
-* 
 *  @brief Loads requested page from storage device to cache and returns cache page
-* 
 *  @param requestedFilePageNo - file page number to load
 *  @return loaded page cache index or nullptr if file is not open.
-* 
 */
 CachePage* CachedFileIO::loadPageToCache(size_t filePageNo) {
 
@@ -715,23 +650,22 @@ CachePage* CachedFileIO::loadPageToCache(size_t filePageNo) {
 	CachePage* cachePage = getFreeCachePage();
 
 	// calculate offset and initialize variables
-	size_t offset = filePageNo * PAGE_SIZE;
-	size_t bytesToRead = PAGE_SIZE;	
 	size_t bytesRead = 0;
 
 	// Clear page
 	{
 		// Lock page
 		std::lock_guard pageLock(cachePage->pageMutex);		
-
-		// Clear page
-		memset(cachePage->data, 0, PAGE_SIZE);
+			
 
 		// Fetch page from storage device
 		{
 			std::lock_guard fileLock(fileMutex);
-			fileHandler.pubseekpos(offset, std::ios_base::in);
-			bytesRead = fileHandler.sgetn((char*)cachePage->data, bytesToRead);
+			bytesRead = file.readPage(filePageNo, (CachePageData*) cachePage->data);
+			if (bytesRead < PAGE_SIZE) {
+				// Clear remaining part of page
+				memset(&cachePage->data[bytesRead], 0, PAGE_SIZE - bytesRead);
+			}
 		}
 
 		// fill loaded page description info
@@ -755,12 +689,9 @@ CachePage* CachedFileIO::loadPageToCache(size_t filePageNo) {
 
 
 /**
-* 
 *  @brief Writes specified cache page to the storage device
-* 
 *  @param cachePageIndex - page index in the cache
 *  @return true - page successfuly persisted, false - write failed or file is not open
-* 
 */ 
 bool CachedFileIO::persistCachePage(CachePage* cachedPage) {
 
@@ -775,10 +706,7 @@ bool CachedFileIO::persistCachePage(CachePage* cachedPage) {
 	// Lock file access
 	{
 		std::lock_guard fileLock(fileMutex);
-		// Go to calculated offset in the file	
-		fileHandler.pubseekpos(offset, std::ios_base::out);
-		// Write cached page to file
-		bytesWritten = fileHandler.sputn((char*)cachedPage->data, bytesToWrite);
+		bytesWritten = file.writePage(cachedPage->filePageNo, (CachePageData*) cachedPage->data);
 	}
 
 	// Check success

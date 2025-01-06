@@ -22,7 +22,7 @@ std::string TestRecordFileIO::getName() const {
 
 void TestRecordFileIO::init() {
 	fileName = (char*)"records.bin";
-	samplesCount = 10000;
+	samplesCount = 1000;
 
 	// Functional test
 	if (std::filesystem::exists(fileName)) {
@@ -75,6 +75,7 @@ bool TestRecordFileIO::singlethreaded() {
 	readDescending(false);
 	insertNewRecords(samplesCount / 2);
 	readAscending(false);
+	editRecords(false);
 	auto endTime = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime);
 	double durationInSeconds = duration.count() / 1000000000.0;
@@ -108,16 +109,19 @@ bool TestRecordFileIO::multithreaded() {
 					insertNewRecords(batchSize / 2);					
 				} else {
 					readAscending(false);
+					editRecords(false);
 					readDescending(false);
 				}				
 			});
-		}
-		
+		}		
+
 		std::stringstream ss;
 		ss << "Total threads started: " << batchesCount;
 		printResult(ss.str().c_str(), true);
 		
 	}
+
+	readAscending(true);
 
 
 	auto endTime = std::chrono::high_resolution_clock::now();
@@ -398,7 +402,7 @@ bool TestRecordFileIO::removeEvenRecords(bool verbose) {
 		printResult(ss.str().c_str(), result);
 	}
 
-	return true;
+	return result;
 }
 
 
@@ -428,5 +432,81 @@ bool TestRecordFileIO::insertNewRecords(size_t recordsCount) {
 		printResult(ss.str().c_str(), result);
 	}
 	
-	return true;
+	return result;
+}
+
+
+
+bool TestRecordFileIO::editRecords(bool verbose) {
+
+
+	if (verbose) std::cout << "-----------------------------------------------------------\n\n";
+
+	auto startTime = std::chrono::high_resolution_clock::now();
+
+	auto cursor = db->getFirstRecord();
+	if (cursor == nullptr) return false;
+
+	size_t counter = 0;
+	size_t prev, next;
+	size_t bytesRead = 0;
+	char* buffer = new char[65536];
+	bool result = true;
+
+	do {
+		if (!cursor->isValid()) break;
+		uint32_t length = cursor->getDataLength();
+		prev = cursor->getPrevPosition();
+		next = cursor->getNextPosition();
+
+		if (!cursor->getRecordData(buffer, length)) {
+			std::unique_lock lock(outputLock);
+			std::cerr << "Record corrupt at " << counter << " record\n";
+			break;
+		}		
+		buffer[length] = 0;
+
+
+		std::stringstream entryStr;		
+		entryStr << buffer << " EDITED Thread=" << std::this_thread::get_id();
+		uint32_t entryStrLen = static_cast<uint32_t> (entryStr.str().length());
+		if (!cursor->setRecordData(entryStr.str().c_str(), entryStrLen)) {
+			std::cerr << "Record edit failed at " << cursor->getPosition() << "\n";
+			result = false;
+			break;
+		}
+
+		bytesRead += length;
+		if (verbose) {
+			std::unique_lock lock(outputLock);
+			std::cout << "Record at position: " << cursor->getPosition();
+			std::cout << " Previous: " << ((prev == NOT_FOUND) ? 0 : prev);
+			std::cout << " Next: " << ((next == NOT_FOUND) ? 0 : next);
+			std::cout << " Length: " << cursor->getDataLength();
+			std::cout << "\n";
+			std::cout << "Data: '" << buffer << "'\n\n";
+		}
+		counter++;
+
+		uint64_t pos = cursor->getPosition();
+
+		if (counter > (samplesCount * 3 / 2) && counter > db->getTotalRecords() || pos == prev) {
+			std::unique_lock lock(outputLock);
+			std::cerr << "\nEDIT ASCENDING CYCLIC REFERENCE!!! counter " << counter << " is more than Total=" << db->getTotalRecords() << "\n";
+			std::cerr << "Record=" << pos << " prev=" << prev << " next=" << next << "\n\n";
+			result = false;
+			break;
+		}
+	} while (cursor->next());
+	auto endTime = std::chrono::high_resolution_clock::now();
+	double duration = (endTime - startTime).count() / 1000000000.0;
+	double throughput = (bytesRead / 1024.0 / 1024.0) / duration;
+	delete[] buffer;
+	{
+		std::stringstream ss;
+		ss << "Editing " << counter << "/" << db->getTotalRecords() << " records in ASCENDING order.";
+		ss << " Payload throughput " << throughput << " Mb/s";
+		printResult(ss.str().c_str(), result);
+	}
+	return result;	
 }

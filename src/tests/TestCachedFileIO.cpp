@@ -70,9 +70,9 @@ bool TestCachedFileIO::verify() const {
 
 
 void TestCachedFileIO::cleanup() {
-	if (std::filesystem::exists(this->fileName)) {
+	/*if (std::filesystem::exists(this->fileName)) {
 		std::filesystem::remove(this->fileName);
-	}
+	}*/
 }
 
 
@@ -99,17 +99,27 @@ void TestCachedFileIO::testfileOpen(bool fullCheck) {
 
 
 void TestCachedFileIO::testSequentialWrites(long long cycles, const char* message) {
+	size_t bytesWritten = 0;
 	size_t messageLength = strlen(message);
 	bool writeFailed = false;
+
+	cf.resetStats();
+	auto startTime = std::chrono::high_resolution_clock::now();
+
 	for (long long i = 0; i < cycles; i++) {
 		writeFailed = !cf.write(i * messageLength, message, messageLength);
-		if (writeFailed) {
-			break;
-		}
+		if (writeFailed) break;
+		bytesWritten += messageLength;			 
 	}
 	bool result = !writeFailed || (!cf.flush());
+
+	auto endTime = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime);
+	double cachedDuration = duration.count() / 1000000.0;
+	double throughput = (bytesWritten / (1024.0 * 1024.0)) / (cachedDuration / 1000.0);
+
 	std::stringstream ss;
-	ss << "Multiple sequential overwrites of " << cycles << " new messages";
+	ss << "Multiple sequential overwrites of " << cycles << " new messages (Throughput " << throughput << " Mb/s)";
 	printResult(ss.str().c_str(), result);
 
 }

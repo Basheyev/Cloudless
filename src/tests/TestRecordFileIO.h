@@ -26,7 +26,8 @@ namespace Cloudless {
 			bool readAscending(bool verbose);
 			bool readDescending(bool verbose);
 			bool removeEvenRecords(bool verbose);
-			bool insertNewRecords(size_t recordCount);			
+			bool insertNewRecords(size_t recordCount);	
+			bool editRecords(bool verbose);
 
 			char* fileName;
 			size_t samplesCount;

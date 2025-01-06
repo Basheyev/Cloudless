@@ -38,16 +38,25 @@
 #include <algorithm>
 #include <unordered_map>
 
+#ifdef _WIN32
+	#define NOMINMAX
+	#include <Windows.h>
+#else
+	#include <fcntl.h>
+	#include <unistd.h>
+	#include <sys/stat.h>
+	#include <cstdlib>
+#endif
 
 namespace Cloudless {
 
 	namespace Storage {
 
 		//-------------------------------------------------------------------------
-		constexpr uint64_t PAGE_SIZE = 8192;             // 8192 bytes page size
+		constexpr uint64_t PAGE_SIZE = 8192;                 // 8192 bytes page size
 		constexpr uint64_t MINIMAL_CACHE = 256 * 1024;       // 256Kb minimal cache
 		constexpr uint64_t DEFAULT_CACHE = 1 * 1024 * 1024;  // 1Mb default cache
-		constexpr uint64_t NOT_FOUND = -1;               // "Not found" signature
+		constexpr uint64_t NOT_FOUND = -1;                   // "Not found" signature
 		//-------------------------------------------------------------------------
 
 		typedef enum {                              // Cache Page State
@@ -64,7 +73,7 @@ namespace Cloudless {
 			uint64_t  filePageNo;                   // Page number in file
 			PageState state;                        // Current page state
 			uint64_t  availableDataLength;          // Available amount of data
-			uint8_t* data;                         // Pointer to data (payload)
+			uint8_t* data;                          // Pointer to data (payload)
 			std::list<CachePage*>::iterator it;     // Cache list node iterator
 			std::shared_mutex pageMutex;            // Shared mutex
 		};
@@ -91,6 +100,29 @@ namespace Cloudless {
 			CACHE_MISSES_RATE,                      // Cache misses rate (0-100%)		
 		} CachedFileStats;
 
+
+		//-------------------------------------------------------------------------
+		// Binary random access page aligned direct file IO
+		//-------------------------------------------------------------------------
+		class BinaryDirectIO {
+		public:
+			BinaryDirectIO() = default;
+			~BinaryDirectIO();
+			bool open(const char* path, bool isReadOnly = false);
+			size_t readPage(size_t pageNo, CachePageData* pageBuffer);
+			size_t writePage(size_t pageNo, const CachePageData* pageBuffer);
+			size_t size();
+			bool flush();
+			bool isOpen();
+			bool close();			
+		private:
+#ifdef _WIN32
+			HANDLE fileHandle = INVALID_HANDLE_VALUE;
+#else
+			int fileDescriptor = -1;
+#endif
+			bool writeMode = false;
+		};
 
 		//-------------------------------------------------------------------------
 		// Binary random access LRU cached file IO
@@ -138,7 +170,7 @@ namespace Cloudless {
 			std::atomic<uint64_t> cacheRequests;      // Cache requests counter
 			std::atomic<uint64_t> cacheMisses;        // Cache misses counter
 
-			std::filebuf      fileHandler;            // file handler
+			BinaryDirectIO    file;
 			std::mutex        fileMutex;              // file mutex
 			std::atomic<bool> readOnly;               // Read only flag
 

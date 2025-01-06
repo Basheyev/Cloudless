@@ -227,10 +227,18 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 		
 	// Lock cursor for changes
-	std::unique_lock lock(cursorMutex);	
+	std::unique_lock lockCursor(cursorMutex);	
+
 	if (recordFile.isReadOnly() || currentPosition == NOT_FOUND) return false;
 
 	uint64_t bytesWritten;
+
+	// Lock storage
+	std::unique_lock lockStorage(recordFile.storageMutex);
+
+	// Update header and check is it still valid
+	uint64_t pos = recordFile.readRecordHeader(currentPosition, recordHeader);
+	if (pos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) return false;
 
 	//------------------------------------------------------------------	
 	// if there is enough capacity in record
@@ -243,7 +251,7 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 		recordHeader.headChecksum = recordFile.checksum((uint8_t*)&recordHeader, RECORD_HEADER_PAYLOAD_SIZE);				
 		{
 			// Lock storage and write record header and data	
-			std::unique_lock lock(recordFile.storageMutex);						
+			//std::unique_lock lock(recordFile.storageMutex);						
 			bytesWritten = recordFile.cachedFile.write(currentPosition, &recordHeader, RECORD_HEADER_SIZE);
 			bytesWritten += recordFile.cachedFile.write(currentPosition + RECORD_HEADER_SIZE, data, length);
 			return bytesWritten == (RECORD_HEADER_SIZE + length);
@@ -257,7 +265,6 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 	uint64_t offset;	
 	{
 		// lock storage find free record of required length
-		std::unique_lock lock(recordFile.storageMutex);
 		offset = recordFile.allocateRecord(length, newRecordHeader);
 		if (offset == NOT_FOUND) return false;
 	}	
@@ -271,7 +278,6 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 		
 	{
 		// Lock storage 
-		std::unique_lock lock(recordFile.storageMutex);
 
 		// Delete old record and add it to the free records list
 		if (!recordFile.addRecordToFreeList(currentPosition)) return NOT_FOUND;
