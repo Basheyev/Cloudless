@@ -2,9 +2,12 @@
 *
 *  BinaryDirectIO class implementation
 *
-*  BinaryDirectIO is designed to improve the performance of binary file I/O
-*  operations by using OS API and page aligned IO, to avoid stdio overhead.
-*  It gives around 30% performance gain.
+*  BinaryDirectIO is designed to achieve up to a 30% improvement in the 
+*  performance of binary file I/O operations by utilizing OS APIs and 
+*  page-aligned I/O to avoid the overhead of stdio. We continue to leverage
+*  the OS kernel's write-behind (buffering) and write coalescing (sequential
+*  grouping) mechanisms, as they remain more efficient and operate closer
+*  to the storage device, ensuring optimal I/O performance.
 * 
 *  (C) Cloudless, Bolat Basheyev 2022-2024
 *
@@ -37,12 +40,11 @@ bool BinaryDirectIO::open(const char* path, bool isReadOnly) {
     this->writeMode = !isReadOnly;
 # ifdef _WIN32
     DWORD accessMode = writeMode ? GENERIC_WRITE | GENERIC_READ : GENERIC_READ;
-    DWORD creationDisposition = writeMode ? OPEN_ALWAYS : OPEN_EXISTING;
-    DWORD flags = 0; // FILE_FLAG_NO_BUFFERING;
-    fileHandle = CreateFileA(path, accessMode, 0, nullptr, creationDisposition, flags, nullptr);
+    DWORD creationDisposition = writeMode ? OPEN_ALWAYS : OPEN_EXISTING;    
+    fileHandle = CreateFileA(path, accessMode, 0, nullptr, creationDisposition, 0, nullptr);
     if (fileHandle == INVALID_HANDLE_VALUE) return false;
 # else
-    int flags = writeMode ? (O_RDWR | O_CREAT) : (O_RDONLY | O_DIRECT);
+    int flags = writeMode ? (O_RDWR | O_CREAT) : (O_RDONLY);
     fileDescriptor = ::open(path.c_str(), flags, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     if (fileDescriptor < 0) return false;
 # endif
@@ -67,9 +69,9 @@ size_t BinaryDirectIO::readPage(size_t pageNo, CachePageData* pageBuffer) {
     if (!ReadFile(fileHandle, pageBuffer->data, PAGE_SIZE, &bytesRead, nullptr)) return bytesRead;
 # else
     off_t offset = static_cast<off_t>(pageNo * PAGE_SIZE);
-    if (lseek(fileDescriptor, offset, SEEK_SET) == -1) return false;    
+    if (lseek(fileDescriptor, offset, SEEK_SET) == -1) return 0;    
     ssize_t bytesRead = ::read(fileDescriptor, page->data, PAGE_SIZE);
-    if (bytesRead != static_cast<ssize_t>(PAGE_SIZE)) return false;
+    if (bytesRead != static_cast<ssize_t>(PAGE_SIZE)) return 0;
 # endif
     return bytesRead;
 }
@@ -91,9 +93,9 @@ size_t BinaryDirectIO::writePage(size_t pageNo, const CachePageData* pageBuffer)
     if (!WriteFile(fileHandle, pageBuffer->data, PAGE_SIZE, &bytesWritten, nullptr)) return bytesWritten;
 # else
     off_t offset = static_cast<off_t>(pageNo * PAGE_SIZE);
-    if (lseek(fileDescriptor, offset, SEEK_SET) == -1) return false;
+    if (lseek(fileDescriptor, offset, SEEK_SET) == -1) return 0;
     ssize_t bytesWritten = ::write(fileDescriptor, page->data, PAGE_SIZE);
-    if (bytesWritten != static_cast<ssize_t>(PAGE_SIZE)) return false;
+    if (bytesWritten != static_cast<ssize_t>(PAGE_SIZE)) return 0;
 # endif
     return bytesWritten;
 }
