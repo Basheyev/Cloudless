@@ -7,7 +7,7 @@
 *  page-aligned I/O to avoid the overhead of stdio. We continue to leverage
 *  the OS kernel's write-behind (buffering) and write coalescing (sequential
 *  grouping) mechanisms, as they remain more efficient and operate closer
-*  to the storage device, ensuring optimal I/O performance.
+*  to the storage device, ensuring optimal I/O performance and thread safety.
 * 
 *  (C) Cloudless, Bolat Basheyev 2025
 *
