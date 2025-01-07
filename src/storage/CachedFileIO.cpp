@@ -371,10 +371,8 @@ bool CachedFileIO::flush() {
 			});
 
 		// Persist pages to storage device
-		for (CachePage* node : cacheList) {
-			if (node->state = PageState::DIRTY) {
-				allDirtyPagesPersisted = allDirtyPagesPersisted && persistCachePage(node);
-			}
+		for (CachePage* node : cacheList) {			
+			allDirtyPagesPersisted = allDirtyPagesPersisted && persistCachePage(node);
 		}
 	}
 
@@ -442,7 +440,7 @@ double CachedFileIO::getStats(CachedFileStats type) {
 */
 size_t CachedFileIO::getFileSize() {
 	if (!isOpen()) return 0;
-	std::lock_guard lock(fileMutex);
+	//std::lock_guard lock(fileMutex);
 	return file.size();
 }
 
@@ -480,13 +478,7 @@ size_t CachedFileIO::setCacheSize(size_t cacheSize) {
 		// Persist all changed pages to storage device
 		this->flush();
 		// Release allocated memory, list and map
-		this->releasePool();
-		// Clear cache pages list and hashmap
-		{
-			std::lock_guard cacheLock(cacheMutex);
-			this->cacheList.clear();
-			this->cacheMap.clear();
-		}
+		this->releasePool();		
 	} 
 	
 	// Calculate pages count
@@ -539,10 +531,9 @@ CachePage* CachedFileIO::allocatePage() {
 	if (pageCounter.load() >= maxPagesCount) return nullptr;
 	
 	// Increment page counter (atomic)
-	uint64_t pageNo = pageCounter.load();
-	pageCounter.fetch_add(1);
-
-	// Allocate memory for cache page
+	uint64_t pageNo = pageCounter.fetch_add(1);
+	
+	// Allocate memory for cache page from pool
 	CachePage* newPage = &cachePageInfoPool[pageNo];
 
 	// Lock page to initialize
@@ -574,21 +565,16 @@ CachePage* CachedFileIO::getFreeCachePage() {
 		// lock cache structure
 		{
 			std::lock_guard cacheLock(cacheMutex);
-
 			// get most aged page - back of the list
 			freePage = this->cacheList.back();
 			// remove page from list's back				
 			this->cacheList.pop_back();
 			// remove page from map
 			this->cacheMap.erase(freePage->filePageNo);
-
-			// if cache page has been rewritten persist page to storage device
-			if (freePage->state == PageState::DIRTY) {
-				// there is page lock inside so do not lock here
-				if (!persistCachePage(freePage)) {
-					throw std::ios_base::failure("Can't persist cache page to the storage device");
-				}
-			}
+			// Persist page to storage device			
+			if (!persistCachePage(freePage)) {
+				throw std::runtime_error("Can't persist cache page to the storage device");
+			}			
 		}
 
 		// lock page to clear
@@ -618,23 +604,21 @@ CachePage* CachedFileIO::searchPageInCache(size_t filePageNo) {
 	// atomic increment total cache lookup requests
 	cacheRequests.fetch_add(1);
 
-	// lock critical section to prevent cache structure change while searching
-	{
+	// lock critical section to prevent cache structure change while searching and changing
+	{		
 		std::lock_guard lock(cacheMutex);
-
 		// Search file page in index map	
 		auto result = cacheMap.find(filePageNo);
-
-		// if page found in cache
-		if (result != cacheMap.end()) {               // Move page to the front of list (LRU):
-			cachePage = result->second;               // 1) Get page pointer
-		//	cacheList.erase(cachePage->it);           // 2) Erase page from list by iterator
-		//	cacheList.push_front(cachePage);          // 3) Push page in the front of the list
-			cacheList.splice(cacheList.begin(), cacheList, cachePage->it);
-			cachePage->it = cacheList.begin();        // 4) update page's list iterator 
-			return cachePage;                         // 5) return page (hashmap pointer is valid)
+		// if page found in cache, move page to the front of list (LRU):
+		if (result != cacheMap.end()) {               
+			cachePage = result->second;               
+			cacheList.splice(cacheList.begin(), cacheList, cachePage->it); 
+			cachePage->it = cacheList.begin();        			
 		}
 	}
+
+	// return page (hashmap pointer is valid)
+	if (cachePage) return cachePage;
 
 	// increment cache misses counter
 	cacheMisses.fetch_add(1);
@@ -700,6 +684,8 @@ bool CachedFileIO::persistCachePage(CachePage* cachedPage) {
 	{
 		// Lock cache page
 		std::unique_lock pageLock(cachedPage->pageMutex);
+		// if page already been persisted then no need to write page 
+		if (cachedPage->state == PageState::CLEAN) return true;
 		// Get file page number of cached page and calculate offset in the file	
 		size_t offset = cachedPage->filePageNo * PAGE_SIZE;
 		// Write page to the file on storage device

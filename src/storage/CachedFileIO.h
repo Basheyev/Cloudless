@@ -177,8 +177,8 @@ namespace Cloudless {
 			std::mutex        cacheMutex;             // Cache mutex
 			CachedPagesMap    cacheMap;               // Cached pages map 
 			CacheLinkedList   cacheList;              // Cached pages double linked list
-			CachePage* cachePageInfoPool;      // Cache pages info memory pool
-			CachePageData* cachePageDataPool;      // Cache pages data memory pool
+			CachePage*        cachePageInfoPool;      // Cache pages info memory pool
+			CachePageData*    cachePageDataPool;      // Cache pages data memory pool
 
 		};
 	}
