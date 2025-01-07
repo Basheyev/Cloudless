@@ -14,7 +14,7 @@
 *    - data consistency check (checksum)
 *    - thread safety
 *
-*  (C) Cloudless, Bolat Basheyev 2022-2024
+*  (C) Cloudless, Bolat Basheyev 2022-2025
 *
 ******************************************************************************/
 
@@ -28,32 +28,10 @@
 using namespace Cloudless::Storage;
 
 /*
-* 
-* @brief RecordFileIO constructor and initializations
-* @param[in] cachedFile - reference to cached file object
-* @param[in] freeDepth - free record lookup maximum iterations (unlim by default)
-* 
+* @brief RecordFileIO constructor
 */
-RecordFileIO::RecordFileIO(CachedFileIO& cachedFile, size_t lookupDepth) : cachedFile(cachedFile), freeLookupDepth(lookupDepth) {
+RecordFileIO::RecordFileIO() {
 	
-	std::unique_lock lock(storageMutex);
-
-	// Check if file is open
-	if (!cachedFile.isOpen()) {
-		const char* msg = "Can't operate on closed cached file.";		
-		throw std::runtime_error(msg);
-	}
-		
-	// If file is empty and write is permitted, then write initial storage header
-	if (cachedFile.getFileSize() == 0 && !cachedFile.isReadOnly()) {
-		createStorageHeader();
-	}
-
-	// Try to load storage header
-	if (!loadStorageHeader()) {
-		const char* msg = "Storage file header is invalid or corrupt.\n";		
-		throw std::runtime_error(msg);
-	}
 }
 
 
@@ -68,6 +46,49 @@ RecordFileIO::~RecordFileIO() {
 		writeStorageHeader();
 	}
 	flush();
+}
+
+
+
+/**
+* @brief Open records file
+* @return true if records file successfuly opened, false otherwise 
+*/
+bool RecordFileIO::open(const char* path, bool isReadOnly, size_t cacheSize) {
+
+	std::unique_lock lock(storageMutex);
+
+	// Check if file is open
+	if (!cachedFile.open(path, isReadOnly, cacheSize)) {
+		const char* msg = "Can't operate on closed cached file.";
+		throw std::runtime_error(msg);
+	}
+
+	// If file is empty and write is permitted, then write initial storage header
+	if (cachedFile.getFileSize() == 0 && !cachedFile.isReadOnly()) {
+		createStorageHeader();
+	}
+
+	// Try to load storage header
+	if (!loadStorageHeader()) {
+		const char* msg = "Storage file header is invalid or corrupt.\n";
+		throw std::runtime_error(msg);
+	}
+
+	// Set default free record lookup depth (fragmentation/performance)
+	freeLookupDepth = DEFAULT_FREE_RECORD_LOOKUP_DEPTH;
+
+	return true;
+
+}
+
+
+/**
+* @brief Open records file
+* @return true if records file successfuly opened, false otherwise
+*/
+bool RecordFileIO::close () {	
+	return cachedFile.close();
 }
 
 

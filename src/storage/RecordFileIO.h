@@ -52,7 +52,8 @@ namespace Cloudless {
 			uint64_t      lastFreeRecord;      // Last free record offset
 		} StorageHeader;
 		
-		constexpr uint64_t STORAGE_HEADER_SIZE = sizeof(StorageHeader);
+		constexpr uint64_t STORAGE_HEADER_SIZE  = sizeof(StorageHeader);
+		constexpr uint64_t DEFAULT_FREE_RECORD_LOOKUP_DEPTH = 100;
 
 		//----------------------------------------------------------------------------
 		// Record header structure (40 bytes)
@@ -76,12 +77,14 @@ namespace Cloudless {
 		class RecordFileIO {
 			friend class RecordCursor;
 		public:
-			RecordFileIO(CachedFileIO& cachedFile, size_t freeDepth = NOT_FOUND);
+			RecordFileIO();
 			~RecordFileIO();
 
-			bool     flush();
-			bool     isOpen();
-			bool     isReadOnly();
+			bool open(const char* path, bool isReadOnly = false, size_t cacheSize = DEFAULT_CACHE);
+			bool flush();
+			bool isOpen();
+			bool isReadOnly();
+			bool close();
 
 			uint64_t getFileSize();
 			uint64_t getTotalRecords();
@@ -97,7 +100,7 @@ namespace Cloudless {
 
 			std::shared_mutex storageMutex;
 
-			CachedFileIO& cachedFile;
+			CachedFileIO  cachedFile;
 			StorageHeader storageHeader;
 			size_t        freeLookupDepth;
 
@@ -106,20 +109,21 @@ namespace Cloudless {
 			bool     loadStorageHeader();
 
 			void     setFreeRecordLookupDepth(uint64_t maxDepth) { freeLookupDepth = maxDepth; }
-
-			uint64_t readRecordHeader(uint64_t offset, RecordHeader& result);
-			uint64_t writeRecordHeader(uint64_t offset, RecordHeader& header);
-
+			
 			uint64_t allocateRecord(uint32_t capacity, RecordHeader& result);
 			uint64_t createFirstRecord(uint32_t capacity, RecordHeader& result);
 			uint64_t appendNewRecord(uint32_t capacity, RecordHeader& result);
 			uint64_t getFromFreeList(uint32_t capacity, RecordHeader& result);
+
+			uint64_t readRecordHeader(uint64_t offset, RecordHeader& result);
+			uint64_t writeRecordHeader(uint64_t offset, RecordHeader& header);
 
 			bool     addRecordToFreeList(uint64_t offset);
 			void     removeRecordFromFreeList(RecordHeader& freeRecord);
 
 			uint32_t checksum(const uint8_t* data, uint64_t length);
 		};
+
 
 		//----------------------------------------------------------------------------
 		// RecordCursor

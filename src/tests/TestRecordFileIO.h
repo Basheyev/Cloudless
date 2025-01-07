@@ -32,7 +32,7 @@ namespace Cloudless {
 			char* fileName;
 			size_t samplesCount;
 			
-			Storage::CachedFileIO cachedFile;
+			//Storage::CachedFileIO cachedFile;
 			std::shared_ptr<Storage::RecordFileIO> db;
 		};
 	}

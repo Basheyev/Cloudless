@@ -12,7 +12,7 @@
 *    - data consistency check (checksum)
 *    - thread safety
 *
-*  (C) Cloudless, Bolat Basheyev 2022-2024
+*  (C) Cloudless, Bolat Basheyev 2022-2025
 *
 ******************************************************************************/
 
@@ -238,7 +238,9 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 
 	// Update header and check is it still valid
 	uint64_t pos = recordFile.readRecordHeader(currentPosition, recordHeader);
-	if (pos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) return false;
+	if (pos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) {
+		return false;
+	}
 
 	//------------------------------------------------------------------	
 	// if there is enough capacity in record

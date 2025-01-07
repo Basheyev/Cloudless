@@ -2,7 +2,7 @@
 *
 *  RecordFileIO class tests implementation
 *
-*  (C) Bolat Basheyev 2022
+*  (C) Bolat Basheyev 2022-2025
 *
 ******************************************************************************/
 
@@ -29,12 +29,12 @@ void TestRecordFileIO::init() {
 		std::filesystem::remove(fileName);
 	}
 	
-	if (!cachedFile.open(fileName, false, 24 * samplesCount)) {
+	db = std::make_shared<RecordFileIO>();
+
+	if (!db->open(fileName, false, 24 * samplesCount)) {
 		std::cout << "ERROR: Can't open file '" << fileName << "' in write mode.\n";
 		return;
-	}
-
-	db = std::make_shared<RecordFileIO>(cachedFile);
+	}	
 
 }
 
@@ -57,10 +57,8 @@ bool TestRecordFileIO::verify() const {
 
 
 void TestRecordFileIO::cleanup() {
-
+	db->close();
 	db.reset();
-	cachedFile.close();
-
 }
 
 
@@ -454,7 +452,10 @@ bool TestRecordFileIO::editRecords(bool verbose) {
 	bool result = true;
 
 	do {
-		if (!cursor->isValid()) break;
+		if (!cursor->isValid()) {
+			cursor = db->getFirstRecord();
+			//break;
+		}
 		uint32_t length = cursor->getDataLength();
 		prev = cursor->getPrevPosition();
 		next = cursor->getNextPosition();
@@ -468,10 +469,11 @@ bool TestRecordFileIO::editRecords(bool verbose) {
 
 
 		std::stringstream entryStr;		
-		entryStr << buffer << " EDITED Thread=" << std::this_thread::get_id();
+		entryStr << "EDITED Thread=" << std::this_thread::get_id();
 		uint32_t entryStrLen = static_cast<uint32_t> (entryStr.str().length());
 		if (!cursor->setRecordData(entryStr.str().c_str(), entryStrLen)) {
-			std::cerr << "Record edit failed at " << cursor->getPosition() << "\n";
+			std::unique_lock lock(outputLock);
+			std::cerr << "\nRecord edit failed at " << cursor->getPosition() << "\n";
 			result = false;
 			break;
 		}
