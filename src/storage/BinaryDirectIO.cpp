@@ -75,7 +75,7 @@ size_t BinaryDirectIO::readPage(size_t pageNo, CachePageData* pageBuffer) {
 # else
     off_t offset = static_cast<off_t>(pageNo * PAGE_SIZE);
     if (lseek(fileDescriptor, offset, SEEK_SET) == -1) return 0;    
-    ssize_t bytesRead = ::read(fileDescriptor, page->data, PAGE_SIZE);
+    ssize_t bytesRead = ::read(fileDescriptor, pageBuffer, PAGE_SIZE);
     if (bytesRead != static_cast<ssize_t>(PAGE_SIZE)) return 0;
 # endif
     return bytesRead;
@@ -102,7 +102,7 @@ size_t BinaryDirectIO::writePage(size_t pageNo, const CachePageData* pageBuffer)
 # else
     off_t offset = static_cast<off_t>(pageNo * PAGE_SIZE);
     if (lseek(fileDescriptor, offset, SEEK_SET) == -1) return 0;
-    ssize_t bytesWritten = ::write(fileDescriptor, page->data, PAGE_SIZE);
+    ssize_t bytesWritten = ::write(fileDescriptor, pageBuffer, PAGE_SIZE);
     if (bytesWritten != static_cast<ssize_t>(PAGE_SIZE)) return 0;
 # endif
     return bytesWritten;

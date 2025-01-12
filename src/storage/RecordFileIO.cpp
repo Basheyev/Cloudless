@@ -755,11 +755,45 @@ uint32_t RecordFileIO::checksum(const uint8_t* data, uint64_t length) {
 
 
 
-void RecordFileIO::lockRecord(std::shared_ptr<RecordCursor> cursor, bool writeLock) {
-
+void RecordFileIO::lockRecord(uint64_t offset, bool writeLock) {
+	
+	// search record position in map
+	auto it = recordLocks.find(offset);
+	
+	// if record position is not found
+	if (it == recordLocks.end()) {
+		// create kay/value pair
+		if (writeLock) {
+			recordLocks[offset].lock();
+		} else {
+			recordLocks[offset].lock_shared();
+		}
+	}
+	else {
+		if (writeLock) {
+			it->second.lock();
+		} else {
+			it->second.lock_shared();
+		}
+	}
 }
 
-void RecordFileIO::unlockRecord(std::shared_ptr<RecordCursor> cursor) {
+
+
+void RecordFileIO::unlockRecord(uint64_t offset, bool writeLock) {
+
+	// search record position in map
+	auto it = recordLocks.find(offset);
+	if (it == recordLocks.end()) return;
+
+	if (writeLock) {
+		it->second.unlock();
+	}
+	else {
+		it->second.unlock_shared();
+	}
+
+	
 
 }
 

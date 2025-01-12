@@ -136,8 +136,8 @@ namespace Cloudless {
 			uint32_t checksum(const uint8_t* data, uint64_t length);
 
 
-			void lockRecord(std::shared_ptr<RecordCursor> cursor, bool writeLock);
-			void unlockRecord(std::shared_ptr<RecordCursor> cursor);
+			void lockRecord(uint64_t offset, bool writeLock);
+			void unlockRecord(uint64_t offset, bool writeLock);
 			void invalidateCursors(uint64_t offset);
 
 		};

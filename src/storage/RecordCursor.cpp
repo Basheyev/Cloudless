@@ -65,6 +65,12 @@ bool RecordCursor::isValid() {
 }
 
 
+
+void RecordCursor::invalidate() {
+	// TODO
+}
+
+
 /*
 * @brief Get cursor position
 * @return current cursor position in database
