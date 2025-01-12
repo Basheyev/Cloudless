@@ -133,13 +133,13 @@ bool CachedFileIO::isReadOnly() const {
 */
 size_t CachedFileIO::read(size_t position, void* dataBuffer, size_t length) {
 
+	// Check if file handler, data buffer and length are not null
+	if (!isOpen() || dataBuffer == nullptr || length == 0) return 0;
+
 	// In case we reading one aligned page
 	if ((position % PAGE_SIZE == 0) && (length == PAGE_SIZE)) {
 		return readPage(position / PAGE_SIZE, dataBuffer);
 	}
-
-	// Check if file handler, data buffer and length are not null
-	if (!isOpen() || dataBuffer == nullptr || length == 0) return 0;
 
 	// Calculate start and end page number in the file
 	size_t firstPageNo = position / PAGE_SIZE;
@@ -216,6 +216,11 @@ size_t CachedFileIO::write(size_t position, const void* dataBuffer, size_t lengt
 
 	// Check if file handler, data buffer and length are not null
 	if (!isOpen() || this->readOnly.load() || dataBuffer == nullptr || length == 0) return 0;
+
+	// In case we writing one aligned page
+	if ((position % PAGE_SIZE == 0) && (length == PAGE_SIZE)) {
+		return writePage(position / PAGE_SIZE, dataBuffer);
+	}
 	
 	// Calculate start and end page number in the file
 	size_t firstPageNo = position / PAGE_SIZE;
@@ -305,6 +310,9 @@ size_t CachedFileIO::readPage(size_t pageNo, void* pageBuffer) {
 		memcpy(dst, src, availableData);
 	}
 
+	// Atomic increment bytes read
+	this->totalBytesRead.fetch_add(availableData);
+
 	return availableData;
 }
 
@@ -334,6 +342,8 @@ size_t CachedFileIO::writePage(size_t pageNo, const void* pageBuffer) {
 		pageInfo->availableDataLength = bytesToCopy; // set available data as PAGE_SIZE
 	}
 
+	// Atomic increment bytes written
+	this->totalBytesWritten.fetch_add(bytesToCopy);
 	return bytesToCopy;
 }
 
@@ -362,7 +372,7 @@ bool CachedFileIO::flush() {
 
 		// Persist pages to storage device
 		for (CachePage* node : cacheList) {			
-			allDirtyPagesPersisted = allDirtyPagesPersisted && writeCachePageToStorage(node);
+			allDirtyPagesPersisted = allDirtyPagesPersisted && writePageToStorage(node);
 		}
 	}
 
@@ -561,7 +571,7 @@ CachePage* CachedFileIO::getFreeCachePage() {
 			// remove page from map
 			this->cacheMap.erase(freePage->filePageNo);
 			// Persist page to storage device			
-			if (!writeCachePageToStorage(freePage)) {
+			if (!writePageToStorage(freePage)) {
 				throw std::runtime_error("Can't persist cache page to the storage device");
 			}			
 		}
@@ -665,7 +675,7 @@ CachePage* CachedFileIO::readPageToCache(size_t filePageNo) {
 *  @param cachePageIndex - page index in the cache
 *  @return true - page successfuly persisted, false - write failed or file is not open
 */ 
-bool CachedFileIO::writeCachePageToStorage(CachePage* cachedPage) {
+bool CachedFileIO::writePageToStorage(CachePage* cachedPage) {
 	
 	size_t bytesToWrite = PAGE_SIZE;
 	size_t bytesWritten = 0;

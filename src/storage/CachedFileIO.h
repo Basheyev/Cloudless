@@ -155,7 +155,7 @@ namespace Cloudless {
 			CachePage* getFreeCachePage();
 			CachePage* searchPageInCache(size_t filePageNo);
 			CachePage* readPageToCache(size_t filePageNo);
-			bool       writeCachePageToStorage(CachePage* pageInfo);
+			bool       writePageToStorage(CachePage* pageInfo);
 
 			std::atomic<uint64_t> maxPagesCount;      // Maximum cache capacity (pages)		
 			std::atomic<uint64_t> pageCounter;        // Allocated pages counter
