@@ -65,13 +65,9 @@ bool CachedFileIO::open(const char* path, bool isReadOnly, size_t cacheSize) {
 
 	// if current file still open, close it
 	if (isOpen()) close();	
-
-	{
-		// Lock file mutex in synchronized section
-		std::lock_guard lock(fileMutex);		
-		// Try to open existing file for binary read/update 
-		if (!file.open(path, isReadOnly)) return false;
-	}
+	
+	// Try to open existing file for binary read/update 
+	if (!file.open(path, isReadOnly)) return false;
 
 	// Set readOnly flag (atomic)
 	this->readOnly.store(isReadOnly);
@@ -101,11 +97,7 @@ bool CachedFileIO::close() {
 	// flush buffers if we have write permissions
 	if (!readOnly.load()) this->flush();
 	// close file
-	{
-		// Lock file mutex in synchronized section
-		std::lock_guard lock(fileMutex);
-		file.close();
-	}
+	file.close();	
 	// Release memory pool of cached pages
 	this->releasePool();		
 	return true;
@@ -116,8 +108,7 @@ bool CachedFileIO::close() {
 *  @brief Checks if file is open
 *  @return true - if file open, false - otherwise
 */
-bool CachedFileIO::isOpen() const {
-	//std::lock_guard lock(fileMutex);
+bool CachedFileIO::isOpen() {	
 	return file.isOpen();
 }
 
@@ -372,7 +363,7 @@ bool CachedFileIO::flush() {
 
 		// Persist pages to storage device
 		for (CachePage* node : cacheList) {			
-			allDirtyPagesPersisted = allDirtyPagesPersisted && persistCachePage(node);
+			allDirtyPagesPersisted = allDirtyPagesPersisted && writeCachePageToStorage(node);
 		}
 	}
 
@@ -439,8 +430,7 @@ double CachedFileIO::getStats(CachedFileStats type) {
 *  @return actual file data size in bytes
 */
 size_t CachedFileIO::getFileSize() {
-	if (!isOpen()) return 0;
-	//std::lock_guard lock(fileMutex);
+	if (!isOpen()) return 0;	
 	return file.size();
 }
 
@@ -543,7 +533,7 @@ CachePage* CachedFileIO::allocatePage() {
 		newPage->filePageNo = NOT_FOUND;
 		newPage->state = PageState::CLEAN;
 		newPage->availableDataLength = 0;
-		newPage->data = cachePageDataPool[pageNo].data;
+		newPage->data = cachePageDataPool[pageNo];
 	}
 
 	return newPage;
@@ -572,7 +562,7 @@ CachePage* CachedFileIO::getFreeCachePage() {
 			// remove page from map
 			this->cacheMap.erase(freePage->filePageNo);
 			// Persist page to storage device			
-			if (!persistCachePage(freePage)) {
+			if (!writeCachePageToStorage(freePage)) {
 				throw std::runtime_error("Can't persist cache page to the storage device");
 			}			
 		}
@@ -623,7 +613,7 @@ CachePage* CachedFileIO::searchPageInCache(size_t filePageNo) {
 	// increment cache misses counter
 	cacheMisses.fetch_add(1);
 	// try to load page to cache from storage
-	return loadPageToCache(filePageNo);
+	return readPageToCache(filePageNo);
 }
 
 
@@ -633,7 +623,7 @@ CachePage* CachedFileIO::searchPageInCache(size_t filePageNo) {
 *  @param requestedFilePageNo - file page number to load
 *  @return loaded page cache index or nullptr if file is not open.
 */
-CachePage* CachedFileIO::loadPageToCache(size_t filePageNo) {
+CachePage* CachedFileIO::readPageToCache(size_t filePageNo) {
 
 	// get new allocated page or most aged one (remove it from the list)
 	CachePage* cachePage = getFreeCachePage();
@@ -644,7 +634,7 @@ CachePage* CachedFileIO::loadPageToCache(size_t filePageNo) {
 	{
 		// Lock cache page
 		std::unique_lock pageLock(cachePage->pageMutex);					
-		// Fetch page from storage device
+		// Fetch page from storage device		
 		bytesRead = file.readPage(filePageNo, (CachePageData*) cachePage->data);
 		if (bytesRead < PAGE_SIZE) {
 			// Clear remaining part of page
@@ -676,7 +666,7 @@ CachePage* CachedFileIO::loadPageToCache(size_t filePageNo) {
 *  @param cachePageIndex - page index in the cache
 *  @return true - page successfuly persisted, false - write failed or file is not open
 */ 
-bool CachedFileIO::persistCachePage(CachePage* cachedPage) {
+bool CachedFileIO::writeCachePageToStorage(CachePage* cachedPage) {
 	
 	size_t bytesToWrite = PAGE_SIZE;
 	size_t bytesWritten = 0;
@@ -688,7 +678,8 @@ bool CachedFileIO::persistCachePage(CachePage* cachedPage) {
 		if (cachedPage->state == PageState::CLEAN) return true;
 		// Get file page number of cached page and calculate offset in the file	
 		size_t offset = cachedPage->filePageNo * PAGE_SIZE;
-		// Write page to the file on storage device
+		// Write page to the file on storage device 
+		// FYI: no synchronization is required because OS API is thread safe
 		bytesWritten = file.writePage(cachedPage->filePageNo, (CachePageData*)cachedPage->data);
 		// Check success
 		if (bytesWritten == bytesToWrite) {

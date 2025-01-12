@@ -32,7 +32,7 @@ add_executable (
     "src/storage/RecordFileIO.h"
 
  
- "src/storage/BinaryDirectIO.cpp")
+ "src/storage/BinaryDirectIO.cpp" )
 
 
 add_executable (
@@ -57,7 +57,7 @@ add_executable (
     "src/tests/TestRecordFileIO.cpp"
     "src/tests/TestRecordFileIO.h"
     
-   "src/storage/BinaryDirectIO.cpp")
+   "src/storage/BinaryDirectIO.cpp" )
 
 
 target_compile_definitions(Cloudless PRIVATE NO_SSL)

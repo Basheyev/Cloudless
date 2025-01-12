@@ -21,8 +21,17 @@
 
 #include "CachedFileIO.h"
 
+#include <memory>
 #include <vector>
 #include <string>
+#include <unordered_map>
+#include <shared_mutex>
+
+
+
+// TODO: StorageHeader - add checksum field
+// TODO: RecordHeader - break bitFlags into system/user flags and give access
+
 
 namespace Cloudless {
 
@@ -38,10 +47,10 @@ namespace Cloudless {
 		//----------------------------------------------------------------------------
 		// Knowledge Storage header structure (64 bytes)
 		//----------------------------------------------------------------------------
-		typedef struct {
+		struct StorageHeader {
 			uint32_t      signature;           // BSDB signature
 			uint32_t      version;             // Format version		
-			uint64_t      endOfFile;           // Size of file
+			uint64_t      endOfData;           // End of data position
 
 			uint64_t      totalRecords;        // Total number of records
 			uint64_t      firstRecord;         // First record offset
@@ -50,15 +59,15 @@ namespace Cloudless {
 			uint64_t      totalFreeRecords;    // Total number of free records
 			uint64_t      firstFreeRecord;     // First free record offset
 			uint64_t      lastFreeRecord;      // Last free record offset
-		} StorageHeader;
+		};
 		
 		constexpr uint64_t STORAGE_HEADER_SIZE  = sizeof(StorageHeader);
-		constexpr uint64_t DEFAULT_FREE_RECORD_LOOKUP_DEPTH = 100;
+		constexpr uint64_t DEFAULT_FREE_RECORD_LOOKUP_DEPTH = 64;
 
 		//----------------------------------------------------------------------------
 		// Record header structure (40 bytes)
 		//----------------------------------------------------------------------------	
-		typedef struct {
+		struct RecordHeader {
 			uint64_t    next;              // Next record position in data file
 			uint64_t    previous;          // Previous record position in data file
 			uint64_t    bitFlags;          // Record bit flags
@@ -66,7 +75,7 @@ namespace Cloudless {
 			uint32_t    dataLength;        // Data length in bytes			
 			uint32_t    dataChecksum;      // Checksum for data consistency check		
 			uint32_t    headChecksum;      // Checksum for header consistency check
-		} RecordHeader;
+		} ;
 
 		constexpr uint64_t RECORD_HEADER_SIZE = sizeof(RecordHeader);
 		constexpr uint32_t RECORD_HEADER_PAYLOAD_SIZE = RECORD_HEADER_SIZE - sizeof(RecordHeader::headChecksum);
@@ -78,6 +87,8 @@ namespace Cloudless {
 			friend class RecordCursor;
 		public:
 			RecordFileIO();
+			RecordFileIO(const RecordFileIO&) = delete;
+			void operator=(const RecordFileIO&) = delete;
 			~RecordFileIO();
 
 			bool open(const char* path, bool isReadOnly = false, size_t cacheSize = DEFAULT_CACHE);
@@ -99,6 +110,9 @@ namespace Cloudless {
 		protected:
 
 			std::shared_mutex storageMutex;
+			std::unordered_map<uint64_t, std::shared_mutex> recordLocks;
+			std::unordered_map<uint64_t, std::vector<std::weak_ptr<RecordCursor>>> cursorsMap;
+			
 
 			CachedFileIO  cachedFile;
 			StorageHeader storageHeader;
@@ -107,21 +121,25 @@ namespace Cloudless {
 			void     createStorageHeader();
 			bool     writeStorageHeader();
 			bool     loadStorageHeader();
-
-			void     setFreeRecordLookupDepth(uint64_t maxDepth) { freeLookupDepth = maxDepth; }
 			
+			uint64_t readRecordHeader(uint64_t offset, RecordHeader& result);
+			uint64_t writeRecordHeader(uint64_t offset, RecordHeader& header);
+
 			uint64_t allocateRecord(uint32_t capacity, RecordHeader& result);
 			uint64_t createFirstRecord(uint32_t capacity, RecordHeader& result);
 			uint64_t appendNewRecord(uint32_t capacity, RecordHeader& result);
 			uint64_t getFromFreeList(uint32_t capacity, RecordHeader& result);
 
-			uint64_t readRecordHeader(uint64_t offset, RecordHeader& result);
-			uint64_t writeRecordHeader(uint64_t offset, RecordHeader& header);
-
 			bool     addRecordToFreeList(uint64_t offset);
 			void     removeRecordFromFreeList(RecordHeader& freeRecord);
 
 			uint32_t checksum(const uint8_t* data, uint64_t length);
+
+
+			void lockRecord(std::shared_ptr<RecordCursor> cursor, bool writeLock);
+			void unlockRecord(std::shared_ptr<RecordCursor> cursor);
+			void invalidateCursors(uint64_t offset);
+
 		};
 
 
@@ -138,6 +156,7 @@ namespace Cloudless {
 			bool getRecordData(void* data, uint32_t length);                 // maybe starting position required
 			bool setRecordData(const void* data, uint32_t length);           // maybe starting position required
 			bool isValid();
+			void invalidate();
 
 			uint64_t getPosition();
 			uint32_t getDataLength();

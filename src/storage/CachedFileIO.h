@@ -21,7 +21,7 @@
 *    - 85%-99% cache read hits leads to 70%-500% performance growth
 *    - 75%-84% cache read hits leads to 12%-50% performance growth
 *
-*  (C) Cloudless, Bolat Basheyev 2022-2024
+*  (C) Cloudless, Bolat Basheyev 2022-2025
 *
 ******************************************************************************/
 
@@ -53,44 +53,39 @@ namespace Cloudless {
 	namespace Storage {
 
 		//-------------------------------------------------------------------------
-		constexpr uint64_t PAGE_SIZE = 8192;                 // 8192 bytes page size
-		constexpr uint64_t MINIMAL_CACHE = 256 * 1024;       // 256Kb minimal cache
-		constexpr uint64_t DEFAULT_CACHE = 1 * 1024 * 1024;  // 1Mb default cache
-		constexpr uint64_t NOT_FOUND = -1;                   // "Not found" signature
+		constexpr uint64_t PAGE_SIZE = 8192;                // 8192 bytes page size
+		constexpr uint64_t MINIMAL_CACHE = 256 * 1024;      // 256Kb minimal cache
+		constexpr uint64_t DEFAULT_CACHE = 1 * 1024 * 1024; // 1Mb default cache
+		constexpr uint64_t NOT_FOUND = 0xFFFFFFFFFFFFFFFF;  // "Not found" signature 
 		//-------------------------------------------------------------------------
 
-		typedef enum {                              // Cache Page State
+		enum class PageState : uint32_t {           // Cache Page State
 			CLEAN = 0,                              // Page has not been changed
 			DIRTY = 1                               // Cache page is rewritten
-		} PageState;
+		};
 
-		typedef struct {
-			uint8_t data[PAGE_SIZE];
-		} CachePageData;
+		using CachePageData = uint8_t[PAGE_SIZE];   // Fixed size cache page 		
 
-		class CachePage {
-		public:
+		struct CachePage {		
 			uint64_t  filePageNo;                   // Page number in file
 			PageState state;                        // Current page state
 			uint64_t  availableDataLength;          // Available amount of data
-			uint8_t* data;                          // Pointer to data (payload)
+			uint8_t*  data;                         // Pointer to data (payload)
 			std::list<CachePage*>::iterator it;     // Cache list node iterator
 			std::shared_mutex pageMutex;            // Shared mutex
 		};
 
 		//-------------------------------------------------------------------------
 
-		typedef                                     // Double linked list
-			std::list<CachePage*>                   // of cached pages pointers
-			CacheLinkedList;
+		using CacheLinkedList =                     // Double linked list
+			std::list<CachePage*>;                  // of cached pages pointers			
 
-		typedef                                     // Hashmap of cached pages
-			std::unordered_map<size_t, CachePage*>  // File page No. -> CachePage*           
-			CachedPagesMap;
+		using CachedPagesMap =                      // Hashmap of cached pages
+			std::unordered_map<size_t, CachePage*>; // File page No. -> CachePage*           			
 
 		//-------------------------------------------------------------------------
 
-		typedef enum {                              // CachedFileIO stats types
+		enum class CachedFileStats : uint32_t {     // CachedFileIO stats types
 			TOTAL_REQUESTS,                         // Total requests to cache
 			TOTAL_CACHE_MISSES,                     // Total number of cache misses
 			TOTAL_CACHE_HITS,                       // Total number of cache hits
@@ -98,8 +93,7 @@ namespace Cloudless {
 			TOTAL_BYTES_READ,		                // Total bytes read		
 			CACHE_HITS_RATE,                        // Cache hits rate (0-100%)
 			CACHE_MISSES_RATE,                      // Cache misses rate (0-100%)		
-		} CachedFileStats;
-
+		};
 
 		//-------------------------------------------------------------------------
 		// Binary random access page aligned direct file IO
@@ -113,15 +107,16 @@ namespace Cloudless {
 			size_t writePage(size_t pageNo, const CachePageData* pageBuffer);
 			size_t size();
 			bool flush();
-			bool isOpen() const;
+			bool isOpen();
 			bool close();			
-		private:
+		private:			
 #ifdef _WIN32
 			HANDLE fileHandle = INVALID_HANDLE_VALUE;
 #else
 			int fileDescriptor = -1;
-#endif
+#endif			
 			bool writeMode = false;
+			std::shared_mutex fileMutex;
 		};
 
 		//-------------------------------------------------------------------------
@@ -136,7 +131,7 @@ namespace Cloudless {
 
 			bool open(const char* path, bool readOnly = false, size_t cache = DEFAULT_CACHE);
 			bool close();
-			bool isOpen() const;
+			bool isOpen();
 			bool isReadOnly() const;
 
 			size_t read(size_t position, void* dataBuffer, size_t length);
@@ -159,8 +154,8 @@ namespace Cloudless {
 			CachePage* allocatePage();
 			CachePage* getFreeCachePage();
 			CachePage* searchPageInCache(size_t filePageNo);
-			CachePage* loadPageToCache(size_t filePageNo);
-			bool       persistCachePage(CachePage* pageInfo);
+			CachePage* readPageToCache(size_t filePageNo);
+			bool       writeCachePageToStorage(CachePage* pageInfo);
 
 			std::atomic<uint64_t> maxPagesCount;      // Maximum cache capacity (pages)		
 			std::atomic<uint64_t> pageCounter;        // Allocated pages counter
@@ -170,8 +165,7 @@ namespace Cloudless {
 			std::atomic<uint64_t> cacheRequests;      // Cache requests counter
 			std::atomic<uint64_t> cacheMisses;        // Cache misses counter
 
-			BinaryDirectIO    file;
-			std::mutex        fileMutex;              // file mutex
+			BinaryDirectIO    file;			          // Thread safe binary file IO
 			std::atomic<bool> readOnly;               // Read only flag
 
 			std::mutex        cacheMutex;             // Cache mutex

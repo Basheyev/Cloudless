@@ -37,6 +37,8 @@ bool BinaryDirectIO::open(const char* path, bool isReadOnly) {
 
     if (isOpen()) close();
 
+    std::unique_lock lock(fileMutex);
+
     this->writeMode = !isReadOnly;
 # ifdef _WIN32
     DWORD accessMode = writeMode ? GENERIC_WRITE | GENERIC_READ : GENERIC_READ;
@@ -61,12 +63,15 @@ bool BinaryDirectIO::open(const char* path, bool isReadOnly) {
 */
 size_t BinaryDirectIO::readPage(size_t pageNo, CachePageData* pageBuffer) {
     if (!pageBuffer) return false;
+
+    std::shared_lock lock(fileMutex);
+
 # ifdef _WIN32
     LARGE_INTEGER offset;
     offset.QuadPart = static_cast<LONGLONG>(pageNo * PAGE_SIZE);
     if (!SetFilePointerEx(fileHandle, offset, nullptr, FILE_BEGIN)) return 0;
     DWORD bytesRead = 0;
-    if (!ReadFile(fileHandle, pageBuffer->data, PAGE_SIZE, &bytesRead, nullptr)) return bytesRead;
+    if (!ReadFile(fileHandle, pageBuffer, PAGE_SIZE, &bytesRead, nullptr)) return bytesRead;
 # else
     off_t offset = static_cast<off_t>(pageNo * PAGE_SIZE);
     if (lseek(fileDescriptor, offset, SEEK_SET) == -1) return 0;    
@@ -85,12 +90,15 @@ size_t BinaryDirectIO::readPage(size_t pageNo, CachePageData* pageBuffer) {
 */
 size_t BinaryDirectIO::writePage(size_t pageNo, const CachePageData* pageBuffer) {
     if (!writeMode || !pageBuffer) return false;
+
+    std::shared_lock lock(fileMutex);
+
 # ifdef _WIN32
     LARGE_INTEGER offset;
     offset.QuadPart = static_cast<LONGLONG>(pageNo * PAGE_SIZE);
     if (!SetFilePointerEx(fileHandle, offset, nullptr, FILE_BEGIN)) return 0;
     DWORD bytesWritten = 0;
-    if (!WriteFile(fileHandle, pageBuffer->data, PAGE_SIZE, &bytesWritten, nullptr)) return bytesWritten;
+    if (!WriteFile(fileHandle, pageBuffer, PAGE_SIZE, &bytesWritten, nullptr)) return bytesWritten;
 # else
     off_t offset = static_cast<off_t>(pageNo * PAGE_SIZE);
     if (lseek(fileDescriptor, offset, SEEK_SET) == -1) return 0;
@@ -106,8 +114,11 @@ size_t BinaryDirectIO::writePage(size_t pageNo, const CachePageData* pageBuffer)
 *  @return actual file data size in bytes
 */
 size_t BinaryDirectIO::size() {
+
+    std::shared_lock lock(fileMutex);
+
 # ifdef _WIN32
-    LARGE_INTEGER size;
+    LARGE_INTEGER size;    
     if (!GetFileSizeEx(fileHandle, &size)) return 0;
     return static_cast<size_t>(size.QuadPart);
 # else
@@ -123,11 +134,13 @@ size_t BinaryDirectIO::size() {
 *  @brief Flush file buffers to storage device
 *  @return true if success, false if fails
 */
-bool BinaryDirectIO::flush() {
+bool BinaryDirectIO::flush() {    
     if (isOpen()) {
 # ifdef _WIN32
+        std::unique_lock lock(fileMutex);
         return FlushFileBuffers(fileHandle) != 0;
 # else
+        std::unique_lock lock(fileMutex);
         return fsync(fileDescriptor) == 0;
 # endif
     }
@@ -139,7 +152,10 @@ bool BinaryDirectIO::flush() {
 *  @brief Checks if file is open
 *  @return true - if file open, false - otherwise
 */
-bool BinaryDirectIO::isOpen() const {
+bool BinaryDirectIO::isOpen() {
+
+    std::shared_lock lock(fileMutex);
+
 #ifdef _WIN32
     return fileHandle != INVALID_HANDLE_VALUE;
 #else
@@ -154,6 +170,9 @@ bool BinaryDirectIO::isOpen() const {
 *  @return true if file correctly closed, false if file has not been opened
 */
 bool BinaryDirectIO::close() {
+    
+    std::unique_lock lock(fileMutex);
+
 # ifdef _WIN32
     if (fileHandle != INVALID_HANDLE_VALUE) {
         CloseHandle(fileHandle);

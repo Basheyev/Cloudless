@@ -20,7 +20,6 @@
 
 #include "RecordFileIO.h"
 
-
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -30,10 +29,10 @@ using namespace Cloudless::Storage;
 /*
 * @brief RecordFileIO constructor
 */
-RecordFileIO::RecordFileIO() {
-	
+RecordFileIO::RecordFileIO() {	
+	// Set default free record lookup depth (fragmentation/performance)
+	freeLookupDepth = DEFAULT_FREE_RECORD_LOOKUP_DEPTH;
 }
-
 
 
 /*
@@ -74,9 +73,6 @@ bool RecordFileIO::open(const char* path, bool isReadOnly, size_t cacheSize) {
 		const char* msg = "Storage file header is invalid or corrupt.\n";
 		throw std::runtime_error(msg);
 	}
-
-	// Set default free record lookup depth (fragmentation/performance)
-	freeLookupDepth = DEFAULT_FREE_RECORD_LOOKUP_DEPTH;
 
 	return true;
 
@@ -131,10 +127,8 @@ uint64_t RecordFileIO::getFileSize() {
 
 
 /*
-*
 * @brief Get total number of records in storage
 * @return total number of records
-*
 */
 uint64_t RecordFileIO::getTotalRecords() {
 	std::shared_lock lock(storageMutex);
@@ -143,10 +137,8 @@ uint64_t RecordFileIO::getTotalRecords() {
 
 
 /*
-* 
 * @biref Get total number of free (released) records
 * @return total number of free records
-* 
 */
 uint64_t RecordFileIO::getTotalFreeRecords() {
 	std::shared_lock lock(storageMutex);
@@ -219,10 +211,8 @@ std::shared_ptr<RecordCursor> RecordFileIO::getRecord(uint64_t recordPosition) {
 
 
 /*
-*
 * @brief Returns cursor to first record in database
 * @return Cursor to consistent record, false - otherwise
-*
 */
 std::shared_ptr<RecordCursor> RecordFileIO::getFirstRecord() {
 	uint64_t firstPos;
@@ -246,10 +236,8 @@ std::shared_ptr<RecordCursor> RecordFileIO::getFirstRecord() {
 
 
 /*
-*
 * @brief Moves cursor to last record in database
 * @return true - if offset points to consistent record, false - otherwise
-*
 */
 std::shared_ptr<RecordCursor> RecordFileIO::getLastRecord() {
 	uint64_t lastPos;
@@ -293,10 +281,6 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 	uint64_t currentPosition = cursor->currentPosition;
 	uint64_t leftSiblingOffset = recordHeader.previous;
 	uint64_t rightSiblingOffset = recordHeader.next;
-
-	if (storageHeader.lastRecord == storageHeader.firstFreeRecord) {
-		throw std::runtime_error("Cyclic reference");
-	}
 
 	// check siblings
 	bool leftSiblingExists = (leftSiblingOffset != NOT_FOUND);
@@ -371,8 +355,6 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 		cursor->recordHeader.headChecksum = 0;		
 	}
 	
-
-
 	return true;
 }
 
@@ -396,7 +378,7 @@ void RecordFileIO::createStorageHeader() {
 
 	storageHeader.signature = KNOWLEDGE_SIGNATURE;
 	storageHeader.version = KNOWLEDGE_VERSION;
-	storageHeader.endOfFile = STORAGE_HEADER_SIZE;
+	storageHeader.endOfData = STORAGE_HEADER_SIZE;
 
 	storageHeader.totalRecords = 0;
 	storageHeader.firstRecord = NOT_FOUND;
@@ -417,15 +399,11 @@ void RecordFileIO::createStorageHeader() {
 *  @return true - if succeeded, false - if failed
 */
 bool RecordFileIO::writeStorageHeader() {
-
-	if (storageHeader.lastRecord == storageHeader.firstFreeRecord) {
-		if (storageHeader.lastRecord != NOT_FOUND) {
-			throw std::runtime_error("Cyclic reference");
-		}
-	}
-
+	// write header to the storage
 	uint64_t bytesWritten = cachedFile.write(0, &storageHeader, STORAGE_HEADER_SIZE);
 	if (bytesWritten != STORAGE_HEADER_SIZE) return false;
+	// adjust free page look up depth as 10% of free records count but not less than minimal
+	freeLookupDepth = std::max(DEFAULT_FREE_RECORD_LOOKUP_DEPTH, storageHeader.totalFreeRecords / 10);
 	return true;
 }
 
@@ -540,7 +518,7 @@ uint64_t RecordFileIO::createFirstRecord(uint32_t capacity, RecordHeader& result
 	// update storage header
 	storageHeader.firstRecord = offset;
     storageHeader.lastRecord = offset;
-	storageHeader.endOfFile += RECORD_HEADER_SIZE + capacity;
+	storageHeader.endOfData += RECORD_HEADER_SIZE + capacity;
 	storageHeader.totalRecords++;
 	writeStorageHeader();
 	
@@ -565,7 +543,7 @@ uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result) 
 	uint64_t freeRecordOffset;
 
 	readRecordHeader(storageHeader.lastRecord, lastRecord);
-	lastRecord.next = freeRecordOffset = storageHeader.endOfFile;
+	lastRecord.next = freeRecordOffset = storageHeader.endOfData;
 	writeRecordHeader(storageHeader.lastRecord, lastRecord);
 
 	result.next = NOT_FOUND;
@@ -575,7 +553,7 @@ uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result) 
 	result.dataLength = 0;
 
 	storageHeader.lastRecord = freeRecordOffset;
-	storageHeader.endOfFile += RECORD_HEADER_SIZE + capacity;
+	storageHeader.endOfData += RECORD_HEADER_SIZE + capacity;
 	storageHeader.totalRecords++;
 	writeStorageHeader();
 
@@ -584,7 +562,6 @@ uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result) 
 
 
 /*
-*
 *  @brief Creates record from the free list (previously deleted records)
 *  @param[in] capacity - requested capacity of record
 *  @param[out] result  - record header of created new record
