@@ -29,7 +29,7 @@ using namespace Cloudless::Storage;
 /*
 * @brief RecordFileIO constructor
 */
-RecordFileIO::RecordFileIO() {	
+RecordFileIO::RecordFileIO() : storageHeader{} {
 	// Set default free record lookup depth (fragmentation/performance)
 	freeLookupDepth = DEFAULT_FREE_RECORD_LOOKUP_DEPTH;
 }
@@ -749,4 +749,21 @@ uint32_t RecordFileIO::checksum(const uint8_t* data, uint64_t length) {
 		b = (b + a) % MOD_ADLER;
 	}
 	return (b << 16) | a;
+}
+
+
+
+
+
+void RecordFileIO::lockRecord(std::shared_ptr<RecordCursor> cursor, bool writeLock) {
+
+}
+
+void RecordFileIO::unlockRecord(std::shared_ptr<RecordCursor> cursor) {
+
+}
+
+void RecordFileIO::invalidateCursors(uint64_t offset) {
+
+
 }

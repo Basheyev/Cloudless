@@ -67,11 +67,11 @@ namespace Cloudless {
 		using CachePageData = uint8_t[PAGE_SIZE];   // Fixed size cache page 		
 
 		struct CachePage {		
-			uint64_t  filePageNo;                   // Page number in file
-			PageState state;                        // Current page state
-			uint64_t  availableDataLength;          // Available amount of data
-			uint8_t*  data;                         // Pointer to data (payload)
-			std::list<CachePage*>::iterator it;     // Cache list node iterator
+			uint64_t  filePageNo = 0;               // Page number in file
+			PageState state = PageState::CLEAN;     // Current page state
+			uint64_t  availableDataLength = 0;      // Available amount of data
+			uint8_t*  data = nullptr;               // Pointer to data (payload)
+			std::list<CachePage*>::iterator it{};   // Cache list node iterator
 			std::shared_mutex pageMutex;            // Shared mutex
 		};
 
@@ -146,8 +146,8 @@ namespace Cloudless {
 
 		private:
 
-			size_t readPage(size_t pageNo, void* userPageBuffer);
-			size_t writePage(size_t pageNo, const void* userPageBuffer);
+			size_t readPage(size_t pageNo, void* pageBuffer);
+			size_t writePage(size_t pageNo, const void* pageBuffer);
 
 			void       allocatePool(size_t pagesCount);
 			void       releasePool();

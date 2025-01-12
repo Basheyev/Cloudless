@@ -285,12 +285,12 @@ size_t CachedFileIO::write(size_t position, const void* dataBuffer, size_t lengt
 
 
 /**
-*  @brief Read page from cached file to user buffer
+*  @brief Read page from cached file to buffer
 *  @param[in]  pageNo - file page number
-*  @param[out] userPageBuffer - data buffer (Boson::PAGE_SIZE)
+*  @param[out] pageBuffer - PAGE_SIZE data buffer
 *  @return total bytes amount actually read to the data buffer
 */
-size_t CachedFileIO::readPage(size_t pageNo, void* userPageBuffer) {
+size_t CachedFileIO::readPage(size_t pageNo, void* pageBuffer) {
 
 	// Lookup or load file page to cache
 	CachePage* pageInfo = searchPageInCache(pageNo);
@@ -300,7 +300,7 @@ size_t CachedFileIO::readPage(size_t pageNo, void* userPageBuffer) {
 	{
 		std::shared_lock pageReadLock(pageInfo->pageMutex);
 		uint8_t* src = pageInfo->data;
-		uint8_t* dst = (uint8_t*) userPageBuffer;
+		uint8_t* dst = (uint8_t*) pageBuffer;
 		availableData = pageInfo->availableDataLength;
 		memcpy(dst, src, availableData);
 	}
@@ -311,19 +311,18 @@ size_t CachedFileIO::readPage(size_t pageNo, void* userPageBuffer) {
 
 
 /**
-*  @brief Writes page from user buffer to cached file
+*  @brief Writes page from buffer to cached file
 *  @param[in]  pageNo     - page number to write
-*  @param[in]  dataBuffer - data buffer with write data
-*  @param[in]  length     - data amount to write
+*  @param[in]  dataBuffer - PAGE_SIZE data buffer with write data
 *  @return total bytes amount written to the cached file
 */
-size_t CachedFileIO::writePage(size_t pageNo, const void* userPageBuffer) {
+size_t CachedFileIO::writePage(size_t pageNo, const void* pageBuffer) {
 	
 	// Fetch-before-write (FBW)
 	CachePage* pageInfo = searchPageInCache(pageNo);
 
 	// Initialize local variables
-	uint8_t* src = (uint8_t*)userPageBuffer;
+	uint8_t* src = (uint8_t*)pageBuffer;
 	uint8_t* dst = pageInfo->data;
 	size_t bytesToCopy = PAGE_SIZE;
 
