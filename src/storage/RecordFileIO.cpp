@@ -754,50 +754,75 @@ uint32_t RecordFileIO::checksum(const uint8_t* data, uint64_t length) {
 
 
 
-
+/**
+*  @brief Locks record by its offset in file
+*  @param[in] offset - record position in file
+*  @param[in] writeLock - true if unique lock, false if shared lock
+*/
 void RecordFileIO::lockRecord(uint64_t offset, bool writeLock) {
+	// lock map
+	bool positionFound = false;
 	
 	// search record position in map
+	mapLock.lock_shared();
 	auto it = recordLocks.find(offset);
-	
-	// if record position is not found
-	if (it == recordLocks.end()) {
+	positionFound = (it == recordLocks.end());
+	mapLock.unlock_shared();
+
+	// if record position is not found in map
+	if (positionFound) {		
+		mapLock.lock();
 		// create kay/value pair
-		if (writeLock) {
-			recordLocks[offset].lock();
-		} else {
-			recordLocks[offset].lock_shared();
-		}
-	}
-	else {
-		if (writeLock) {
-			it->second.lock();
-		} else {
-			it->second.lock_shared();
-		}
+		auto& recordLock = recordLocks[offset];
+		mapLock.unlock();
+		recordLock.counter.fetch_add(1);		
+		if (writeLock) 
+			recordLock.mutex.lock();
+		else 
+			recordLock.mutex.lock_shared();
+	} else { 
+		// if record position is found in map
+		auto& recordLock = it->second;
+		recordLock.counter.fetch_add(1);
+		if (writeLock) 
+			recordLock.mutex.lock(); 
+		else 
+			recordLock.mutex.lock_shared();
 	}
 }
 
 
 
+/**
+*  @brief Unlocks record by its offset in file
+*  @param[in] offset - record position in file
+*  @param[in] writeLock - true if unique lock, false if shared lock
+*/
 void RecordFileIO::unlockRecord(uint64_t offset, bool writeLock) {
-
+			
+	// shared lock map
+	mapLock.lock_shared();
 	// search record position in map
 	auto it = recordLocks.find(offset);
+	// if record position is not found in map
 	if (it == recordLocks.end()) return;
+	// if record position is found in map
+	RecordLock& recordLock = it->second;	
+	// shared unlock map
+	mapLock.unlock_shared();
 
-	if (writeLock) {
-		it->second.unlock();
-	}
-	else {
-		it->second.unlock_shared();
-	}
-
+	if (writeLock) 
+		recordLock.mutex.unlock(); 
+	else 
+		recordLock.mutex.unlock_shared();
 	
-
+	// if it last lock - delete it from map
+	if (recordLock.counter.fetch_sub(1) <= 0) {
+		mapLock.lock();
+		recordLocks.erase(it);
+		mapLock.unlock();
+	}
+	
 }
 
-void RecordFileIO::invalidateCursors(uint64_t offset) {
 
-
-}

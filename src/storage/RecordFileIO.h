@@ -81,6 +81,14 @@ namespace Cloudless {
 		constexpr uint32_t RECORD_HEADER_PAYLOAD_SIZE = RECORD_HEADER_SIZE - sizeof(RecordHeader::headChecksum);
 
 		//----------------------------------------------------------------------------
+		// Record lock structure (40 bytes)
+		//----------------------------------------------------------------------------	
+		struct RecordLock {			
+			std::shared_mutex     mutex;
+			std::atomic<int32_t>  counter;
+		};
+
+		//----------------------------------------------------------------------------
 		// RecordFileIO
 		//----------------------------------------------------------------------------
 		class RecordFileIO {
@@ -109,10 +117,10 @@ namespace Cloudless {
 
 		protected:
 
-			std::shared_mutex storageMutex;
-			std::unordered_map<uint64_t, std::shared_mutex> recordLocks;
-			std::unordered_map<uint64_t, std::vector<std::weak_ptr<RecordCursor>>> cursorsMap;
-			
+			std::shared_mutex storageMutex;			
+			std::shared_mutex mapLock;
+			std::unordered_map<uint64_t, RecordLock> recordLocks;
+						
 
 			CachedFileIO  cachedFile;
 			StorageHeader storageHeader;
@@ -138,7 +146,7 @@ namespace Cloudless {
 
 			void lockRecord(uint64_t offset, bool writeLock);
 			void unlockRecord(uint64_t offset, bool writeLock);
-			void invalidateCursors(uint64_t offset);
+			
 
 		};
 
