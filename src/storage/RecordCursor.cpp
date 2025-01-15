@@ -19,7 +19,7 @@
 
 
 #include "RecordFileIO.h"
-
+#include <iostream>
 
 using namespace Cloudless::Storage;
 
@@ -41,15 +41,16 @@ RecordCursor::RecordCursor(RecordFileIO& rf, RecordHeader& header, uint64_t posi
 */
 bool RecordCursor::isValid() {
 	// Sample record header
-	RecordHeader recordSample;
+	//RecordHeader recordSample;
 	uint64_t samplePosition;
 	{
-		std::shared_lock lockCursor(cursorMutex);
+		std::unique_lock lockCursor(cursorMutex);
 		// Check if cursor invalidated after record deletion
 		if (currentPosition == NOT_FOUND) return false;
-		// Make sure atomic read
-		std::shared_lock lockStorage(recordFile.storageMutex);
-		samplePosition = recordFile.readRecordHeader(currentPosition, recordSample);
+		// Make sure atomic read		
+		recordFile.lockRecord(currentPosition, false);
+		samplePosition = recordFile.readRecordHeader(currentPosition, this->recordHeader);
+		recordFile.unlockRecord(currentPosition, false);
 	}
 	// Lock for reading check conditions 
 	std::shared_lock lockCursor(cursorMutex);
@@ -57,16 +58,19 @@ bool RecordCursor::isValid() {
 		// Record is corrupt
 		(samplePosition == NOT_FOUND) ||
 		// Record is deleted
-		(recordSample.bitFlags & RECORD_DELETED_FLAG) ||
-		// Record has been changed
-		(recordSample.headChecksum != recordHeader.headChecksum);
-	
+		(recordHeader.bitFlags & RECORD_DELETED_FLAG); 
+
+	if (invalid) {
+		std::cout << "HOP!";
+	}
+
 	return !invalid;
 }
 
 
 
 void RecordCursor::invalidate() {
+	currentPosition = NOT_FOUND;
 	// TODO
 }
 
@@ -92,17 +96,16 @@ bool RecordCursor::setPosition(uint64_t offset) {
 	// Try to read record header
 	RecordHeader header;
 	{
-		std::shared_lock lock(recordFile.storageMutex);
-		uint64_t recPos = recordFile.readRecordHeader(offset, header);
-		if (recPos == NOT_FOUND || header.bitFlags & RECORD_DELETED_FLAG) return false;
-	}
-	
-	// Copy to internal buffer
-	{
 		std::unique_lock lock(cursorMutex);
-		memcpy(&recordHeader, &header, RECORD_HEADER_SIZE);
+		recordFile.lockRecord(offset, false);
+		uint64_t recPos = recordFile.readRecordHeader(offset, recordHeader);
+		recordFile.unlockRecord(offset, false);
+		if (recPos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) {
+			currentPosition = NOT_FOUND;
+			return false;
+		}
 		currentPosition = offset;
-	}
+	}	
 	return true;
 }
 
@@ -115,12 +118,16 @@ bool RecordCursor::next() {
 	uint64_t nextPos;
 	{
 		std::shared_lock lock(cursorMutex);
-		if (currentPosition == NOT_FOUND || recordHeader.next == NOT_FOUND) return false;		
+		if (currentPosition == NOT_FOUND || recordHeader.next == NOT_FOUND) {
+			return false;
+		}
 		nextPos = recordHeader.next;
 		{
 			// check if we reached the last record
-			std::shared_lock storageLock(recordFile.storageMutex);
-			if (currentPosition == recordFile.storageHeader.lastRecord) return false;
+			std::shared_lock storageHeaderLock(recordFile.headerMutex);
+			if (currentPosition == recordFile.storageHeader.lastRecord) {
+				return false;
+			}
 		}
 	}
 	return setPosition(nextPos);
@@ -140,7 +147,7 @@ bool RecordCursor::previous() {
 		prevPos = recordHeader.previous;
 		{
 			// check if we reached the first record
-			std::shared_lock storageLock(recordFile.storageMutex);
+			std::shared_lock storageHeaderLock(recordFile.headerMutex);
 			if (currentPosition == recordFile.storageHeader.firstRecord) return false;
 		}
 	}	
@@ -206,15 +213,24 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 	std::shared_lock lock(cursorMutex);
 
 	if (currentPosition == NOT_FOUND || length == 0) return false;
-	uint64_t bytesToRead = std::min(recordHeader.dataLength, length);
-	uint64_t dataOffset = currentPosition + RECORD_HEADER_SIZE;
+	
+	uint64_t bytesToRead;
+	uint64_t dataOffset;
 	{
-		std::shared_lock lock(recordFile.storageMutex);
+		//std::shared_lock lock(recordFile.storageMutex);
+		recordFile.lockRecord(currentPosition, false);
+		recordFile.readRecordHeader(currentPosition, recordHeader);
+		bytesToRead = std::min(recordHeader.dataLength, length);
+		dataOffset = currentPosition + RECORD_HEADER_SIZE;
 		recordFile.cachedFile.read(dataOffset, data, bytesToRead);
+		recordFile.unlockRecord(currentPosition, false);
 	}
 	// check data consistency by checksum
 	uint32_t dataCheckSum = recordFile.checksum((uint8_t*)data, bytesToRead);
-	if (dataCheckSum != recordHeader.dataChecksum) return false;
+	if (dataCheckSum != recordHeader.dataChecksum) {
+		std::cout << "checksum not equal\n";
+		return false;
+	}
 	
 	return true;
 }
@@ -240,13 +256,14 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 	uint64_t bytesWritten;
 
 	// Lock storage
-	std::unique_lock lockStorage(recordFile.storageMutex);
+	//std::unique_lock lockStorage(recordFile.storageMutex);
 
 	// Update header and check is it still valid
+	recordFile.lockRecord(currentPosition, false);
 	uint64_t pos = recordFile.readRecordHeader(currentPosition, recordHeader);
-	if (pos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) {
-		return false;
-	}
+	recordFile.unlockRecord(currentPosition, false);
+	if (pos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) return false;
+	
 
 	//------------------------------------------------------------------	
 	// if there is enough capacity in record
@@ -291,13 +308,18 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 		if (!recordFile.addRecordToFreeList(currentPosition)) return NOT_FOUND;
 		// if this is first record, then update storage header
 		if (recordHeader.previous == NOT_FOUND) {
-			recordFile.storageHeader.firstRecord = offset;
+			{
+				std::unique_lock lock(recordFile.headerMutex);
+				recordFile.storageHeader.firstRecord = offset;
+			}
 			recordFile.writeStorageHeader();
 		};
 
-		// Write new record header and data to the storage file		
+		// Write new record header and data to the storage file	
+		recordFile.lockRecord(offset, true);	
 		bytesWritten = recordFile.cachedFile.write(offset, &newRecordHeader, RECORD_HEADER_SIZE);
 		bytesWritten += recordFile.cachedFile.write(offset + RECORD_HEADER_SIZE, data, length);
+		recordFile.unlockRecord(offset, true);
 	}
 
 	// Update current record and position

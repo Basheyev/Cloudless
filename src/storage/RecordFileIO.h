@@ -62,7 +62,8 @@ namespace Cloudless {
 		};
 		
 		constexpr uint64_t STORAGE_HEADER_SIZE  = sizeof(StorageHeader);
-		constexpr uint64_t DEFAULT_FREE_RECORD_LOOKUP_DEPTH = 64;
+		constexpr uint64_t FREE_RECORD_LOOKUP_DEPTH = 64; // Minimal search depth is 64
+		constexpr uint64_t FREE_RECORD_LOOKUP_RATIO = 10; // Max search depth is 1/10
 
 		//----------------------------------------------------------------------------
 		// Record header structure (40 bytes)
@@ -118,13 +119,13 @@ namespace Cloudless {
 		protected:
 
 			std::shared_mutex storageMutex;			
-			std::shared_mutex mapLock;
+			std::shared_mutex headerMutex;
+			std::shared_mutex mapMutex;
 			std::unordered_map<uint64_t, RecordLock> recordLocks;
 						
-
 			CachedFileIO  cachedFile;
 			StorageHeader storageHeader;
-			size_t        freeLookupDepth;
+			std::atomic<size_t> freeLookupDepth;
 
 			void     createStorageHeader();
 			bool     writeStorageHeader();
@@ -143,11 +144,9 @@ namespace Cloudless {
 
 			uint32_t checksum(const uint8_t* data, uint64_t length);
 
-
-			void lockRecord(uint64_t offset, bool writeLock);
-			void unlockRecord(uint64_t offset, bool writeLock);
+			void     lockRecord(uint64_t offset, bool writeLock);
+			void     unlockRecord(uint64_t offset, bool writeLock);
 			
-
 		};
 
 

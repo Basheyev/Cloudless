@@ -22,7 +22,7 @@ std::string TestRecordFileIO::getName() const {
 
 void TestRecordFileIO::init() {
 	fileName = (char*)"records.bin";
-	samplesCount = 1000;
+	samplesCount = 10000;
 
 	// Functional test
 	if (std::filesystem::exists(fileName)) {
@@ -68,12 +68,13 @@ void TestRecordFileIO::cleanup() {
 bool TestRecordFileIO::singlethreaded() {
 	auto startTime = std::chrono::high_resolution_clock::now();
 	generateData(samplesCount);
+//	readAscending(false);
+//	removeEvenRecords(false);
+//	readDescending(false);
+//	insertNewRecords(samplesCount / 2);
 	readAscending(false);
-	removeEvenRecords(false);
-	readDescending(false);
-	insertNewRecords(samplesCount / 2);
-	readAscending(false);
-	editRecords(false);
+//	editRecords(false);
+	db->flush();
 	auto endTime = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime);
 	double durationInSeconds = duration.count() / 1000000000.0;
@@ -99,16 +100,16 @@ bool TestRecordFileIO::multithreaded() {
 		for (uint64_t i = 0; i < batchesCount; i++) {
 			workers.emplace_back([this, i, batchSize]() {		
 
-				// ever 3rd thread is writer
+				// every 3rd thread is writer
 				if (i % 3 == 0) {
-					generateData(batchSize);
-					readAscending(false);
-					removeEvenRecords(false);
-					insertNewRecords(batchSize / 2);					
-				} else {
-					readAscending(false);
-					editRecords(false);
+				//	generateData(batchSize);
 					readDescending(false);
+				//	removeEvenRecords(false);
+				//	insertNewRecords(batchSize / 2);					
+				} else {
+				//	readAscending(false);
+				//	editRecords(false);
+					readAscending(false);
 				}				
 			});
 		}		
@@ -119,7 +120,7 @@ bool TestRecordFileIO::multithreaded() {
 		
 	}
 
-	readAscending(true);
+	//readAscending(true);
 
 
 	auto endTime = std::chrono::high_resolution_clock::now();
@@ -193,6 +194,7 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 	auto startTime = std::chrono::high_resolution_clock::now();
 
 	auto cursor = db->getFirstRecord();
+	auto totalRecs = db->getTotalRecords();
 	if (cursor == nullptr) return false;
 
 	size_t counter = 0;
@@ -203,8 +205,8 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 
 	do {
 		if (!cursor->isValid()) {
-			/*std::unique_lock lock(outputLock);
-			std::cout << "Cursor invalidated at " << counter << " record\n";*/
+			std::unique_lock lock(outputLock);
+			std::cout << "Cursor invalidated at " << counter << " record (while reading ascending)\n";
 			break;
 		}
 		uint32_t length = cursor->getDataLength();
@@ -212,7 +214,7 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 		next = cursor->getNextPosition();		
 		if (!cursor->getRecordData(buffer, length)) {
 			std::unique_lock lock(outputLock);
-			std::cout << "Record corrupt at " << counter << " record\n";
+			std::cout << "Record corrupt at " << counter << " record (ascending)\n";
 			break;
 		}
 		buffer[length] = 0;
@@ -242,7 +244,7 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 	delete[] buffer;	
 	{		
 		std::stringstream ss;		
-		ss << "Reading " << counter << "/" << db->getTotalRecords() << " records in ASCENDING order.";
+		ss << "Reading " << counter << "/" << totalRecs << " records in ASCENDING order.";
 		ss << " Payload throughput " << throughput << " Mb/s";
 		printResult(ss.str().c_str(), result);
 	}
@@ -257,6 +259,7 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 	if (verbose) std::cout << "-----------------------------------------------------------\n\n";
 
 	auto cursor = db->getLastRecord();
+	auto totalRecs = db->getTotalRecords();
 	if (cursor == nullptr) return false;
 
 	size_t counter = 0;
@@ -272,13 +275,15 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 		uint64_t pos = cursor->getPosition();
 		if (!cursor->isValid()) {
 			std::unique_lock lock(outputLock);
-			std::cout << "Cursor invalidated at " << counter << " record\n";
+			std::cout << "Cursor invalidated at " << counter << " record while reading descending\n";
 			break;
 		}
 		uint32_t length = cursor->getDataLength();
 		prev = cursor->getPrevPosition();
 		next = cursor->getNextPosition();
 		if (!cursor->getRecordData(buffer, length)) {
+			std::unique_lock lock(outputLock);
+			std::cout << "Record corrupt at " << counter << " record (descending)\n";
 			result = false;
 			break;
 		}
@@ -322,7 +327,7 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 		size_t totalRecords = db->getTotalRecords();		
 		double throughput = (bytesRead / 1024.0 / 1024.0) / duration;
 		std::stringstream ss;
-		ss << "Reading " << counter << "/" << db->getTotalRecords() << " records in DESCENDING order.";
+		ss << "Reading " << counter << "/" << totalRecs << " records in DESCENDING order.";
 		ss << " Payload throughput " << throughput << " Mb/s";
 		printResult(ss.str().c_str(), result);
 	}

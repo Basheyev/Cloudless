@@ -43,7 +43,8 @@ bool BinaryDirectIO::open(const char* path, bool isReadOnly) {
 # ifdef _WIN32
     DWORD accessMode = writeMode ? GENERIC_WRITE | GENERIC_READ : GENERIC_READ;
     DWORD creationDisposition = writeMode ? OPEN_ALWAYS : OPEN_EXISTING;    
-    fileHandle = CreateFileA(path, accessMode, 0, nullptr, creationDisposition, 0, nullptr);
+    DWORD flags = FILE_FLAG_OVERLAPPED;
+    fileHandle = CreateFileA(path, accessMode, 0, nullptr, creationDisposition, flags, nullptr);
     if (fileHandle == INVALID_HANDLE_VALUE) return false;
 # else
     int flags = writeMode ? (O_RDWR | O_CREAT) : (O_RDONLY);
@@ -66,12 +67,21 @@ size_t BinaryDirectIO::readPage(size_t pageNo, CachePageData* pageBuffer) {
 
     std::shared_lock lock(fileMutex);
 
-# ifdef _WIN32
-    LARGE_INTEGER offset;
-    offset.QuadPart = static_cast<LONGLONG>(pageNo * PAGE_SIZE);
-    if (!SetFilePointerEx(fileHandle, offset, nullptr, FILE_BEGIN)) return 0;
+# ifdef _WIN32    
+    OVERLAPPED overlapped = { 0 };
+    uint64_t offset = pageNo * PAGE_SIZE;
+    overlapped.Offset = static_cast<DWORD>(offset & 0xFFFFFFFF);             // lower 32 bit
+    overlapped.OffsetHigh = static_cast<DWORD>((offset >> 32) & 0xFFFFFFFF); // higher 32 bit
     DWORD bytesRead = 0;
-    if (!ReadFile(fileHandle, pageBuffer, PAGE_SIZE, &bytesRead, nullptr)) return bytesRead;
+
+    BOOL result = ReadFile(fileHandle, pageBuffer, PAGE_SIZE, &bytesRead, &overlapped);
+
+    if (!result && GetLastError() == ERROR_IO_PENDING) {        
+        GetOverlappedResult(fileHandle, &overlapped, &bytesRead, TRUE);
+    }
+    
+    return bytesRead;
+
 # else
     off_t offset = static_cast<off_t>(pageNo * PAGE_SIZE);
     if (lseek(fileDescriptor, offset, SEEK_SET) == -1) return 0;    
@@ -94,11 +104,20 @@ size_t BinaryDirectIO::writePage(size_t pageNo, const CachePageData* pageBuffer)
     std::shared_lock lock(fileMutex);
 
 # ifdef _WIN32
-    LARGE_INTEGER offset;
-    offset.QuadPart = static_cast<LONGLONG>(pageNo * PAGE_SIZE);
-    if (!SetFilePointerEx(fileHandle, offset, nullptr, FILE_BEGIN)) return 0;
+    OVERLAPPED overlapped = { 0 };
+    uint64_t offset = pageNo * PAGE_SIZE;
+    overlapped.Offset = static_cast<DWORD>(offset & 0xFFFFFFFF);             // lower 32 bit
+    overlapped.OffsetHigh = static_cast<DWORD>((offset >> 32) & 0xFFFFFFFF); // higher 32 bit    
     DWORD bytesWritten = 0;
-    if (!WriteFile(fileHandle, pageBuffer, PAGE_SIZE, &bytesWritten, nullptr)) return bytesWritten;
+
+    BOOL result = WriteFile(fileHandle, pageBuffer, PAGE_SIZE, &bytesWritten, &overlapped);
+
+    if (!result && GetLastError() == ERROR_IO_PENDING) {
+        GetOverlappedResult(fileHandle, &overlapped, &bytesWritten, TRUE);
+    }
+
+    return bytesWritten;
+
 # else
     off_t offset = static_cast<off_t>(pageNo * PAGE_SIZE);
     if (lseek(fileDescriptor, offset, SEEK_SET) == -1) return 0;
