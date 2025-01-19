@@ -212,7 +212,10 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 	// Lock cursor for reading
 	std::shared_lock lock(cursorMutex);
 
-	if (currentPosition == NOT_FOUND || length == 0) return false;
+	if (currentPosition == NOT_FOUND || length == 0) {
+		std::cout << "Record header invalidated before update\n";
+		return false;
+	}
 	
 	uint64_t bytesToRead;
 	uint64_t dataOffset;
@@ -230,6 +233,7 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 
 	if (invalidated) {
 		currentPosition = NOT_FOUND;
+		std::cout << "Record header invalidated after update\n";
 		return false;
 	}
 

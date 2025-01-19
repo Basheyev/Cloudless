@@ -155,10 +155,10 @@ uint64_t RecordFileIO::getTotalFreeRecords() {
 std::shared_ptr<RecordCursor> RecordFileIO::createRecord(const void* data, uint32_t length) {
 
 	// Check if file writes are permitted
-	{
-		std::unique_lock lockStorage(storageMutex);
+	//{
+	//	std::unique_lock lockStorage(storageMutex);
 		if (cachedFile.isReadOnly()) return nullptr;
-	}
+	//}
 	
 	// Allocate new record and link to last record
 	RecordHeader newRecordHeader;
@@ -890,36 +890,36 @@ uint32_t RecordFileIO::checksum(const uint8_t* data, uint64_t length) {
 *  @param[in] exclusive - true if unique lock, false if shared lock
 */
 void RecordFileIO::lockRecord(uint64_t offset, bool exclusive) {
+	
 	std::shared_ptr<RecordLock> recordLock;
 
 	{ 
-		std::shared_lock<std::shared_mutex> mapLock(mapMutex);
-		auto it = recordLocks.find(offset);
-		if (it != recordLocks.end()) {
-			recordLock = it->second;
-			if (recordLock) recordLock->counter.fetch_add(1);
+		std::shared_lock<std::shared_mutex> mapLock(mapMutex);     // shared lock records map (RAII)
+		auto it = recordLocks.find(offset);                        // search record with given offset
+		if (it != recordLocks.end()) {                             // if found
+			recordLock = it->second;                               // get record lock structure std::shared_ptr
+			if (recordLock) recordLock->counter.fetch_add(1);      // if it exists increment pointers counter
 		}
 	} 
 
-	if (!recordLock) {
-		std::unique_lock<std::shared_mutex> mapLock(mapMutex);
-		auto it = recordLocks.find(offset);
-		if (it == recordLocks.end()) {
-			recordLock = std::make_shared<RecordLock>();
-			recordLocks[offset] = recordLock;
-			recordLock->counter.fetch_add(1);
-		} else {
-			recordLock = it->second;
-			recordLock->counter.fetch_add(1);
+	if (!recordLock) {                                             // if record lock is not found
+		std::unique_lock<std::shared_mutex> mapLock(mapMutex);     // exclusive lock records map (RAII)
+		auto it = recordLocks.find(offset);                        // acknowledge that record lock exists
+		if (it == recordLocks.end()) {                             // if record lock not exists
+			recordLock = std::make_shared<RecordLock>();           // create new one
+			recordLocks[offset] = recordLock;                      // add it to the records mapp
+			recordLock->counter.fetch_add(1);                      // increment pointers counter
+		} else {                                                   // if record lock exists
+			recordLock = it->second;                               // get it
+			recordLock->counter.fetch_add(1);                      // increment pointers counter
 		}
 	}
 
-	if (exclusive) {		
-		recordLock->mutex.lock();		
-	} else {		
-		recordLock->mutex.lock_shared();
-	}
-	
+	if (exclusive) 	                                               // if exclusive lock requested
+		recordLock->mutex.lock();		                           // do exclusive lock
+	else                                                           // otherwise
+		recordLock->mutex.lock_shared();                           // do shared lock
+		
 }
 
 
@@ -933,25 +933,24 @@ void RecordFileIO::unlockRecord(uint64_t offset, bool exclusive) {
 	std::shared_ptr<RecordLock> recordLock;
 
 	{
-		std::shared_lock<std::shared_mutex> mapLock(mapMutex);
-		auto it = recordLocks.find(offset);
-		if (it == recordLocks.end()) return;
-		recordLock = it->second;
-		if (!recordLock) return;
+		std::shared_lock<std::shared_mutex> mapLock(mapMutex);    // shared lock records map (RAII)
+		auto it = recordLocks.find(offset);                       // search record with given offset
+		if (it == recordLocks.end()) return;                      // if not found - do nothing and return
+		recordLock = it->second;                                  // get RecordLock shared_ptr by offset
+		if (!recordLock) return;                                  // if not found - do nothing and return
 	}
 
-	if (exclusive) {
-		recordLock->mutex.unlock();		
-	} else {
-		recordLock->mutex.unlock_shared();
-	}
-		
+	if (exclusive)                                                // if exclusive lock requested
+		recordLock->mutex.unlock();		                          // do exclusive lock
+	else                                                          // otherwise
+		recordLock->mutex.unlock_shared();                        // do shared lock
+			
 	{
-		std::unique_lock<std::shared_mutex> mapLock(mapMutex);		
-		if (recordLock->counter.fetch_sub(1) == 1) {
-			auto it = recordLocks.find(offset);
-			if (it != recordLocks.end()) {
-				recordLocks.erase(offset);
+		std::unique_lock<std::shared_mutex> mapLock(mapMutex);	  // exclusive lock records map (RAII)
+		if (recordLock->counter.fetch_sub(1) == 1) {              // if no other locks left
+			auto it = recordLocks.find(offset);                   // acknowledge that RecordLock exists again
+			if (it != recordLocks.end()) {                        
+				recordLocks.erase(offset);                        // erase from records map
 			}
 		}
 	}
