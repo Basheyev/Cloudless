@@ -86,7 +86,7 @@ namespace Cloudless {
 		//----------------------------------------------------------------------------	
 		struct RecordLock {			
 			std::shared_mutex     mutex;
-			std::atomic<int32_t>  counter;
+			std::atomic<int32_t>  counter;						
 		};
 
 		//----------------------------------------------------------------------------
@@ -121,7 +121,7 @@ namespace Cloudless {
 			std::shared_mutex storageMutex;			
 			std::shared_mutex headerMutex;
 			std::shared_mutex mapMutex;
-			std::unordered_map<uint64_t, RecordLock> recordLocks;
+			std::unordered_map<uint64_t, std::shared_ptr<RecordLock>> recordLocks;
 						
 			CachedFileIO  cachedFile;
 			StorageHeader storageHeader;
@@ -144,8 +144,8 @@ namespace Cloudless {
 
 			uint32_t checksum(const uint8_t* data, uint64_t length);
 
-			void     lockRecord(uint64_t offset, bool writeLock);
-			void     unlockRecord(uint64_t offset, bool writeLock);
+			void     lockRecord(uint64_t offset, bool exclusive);
+			void     unlockRecord(uint64_t offset, bool exclusive);
 			
 		};
 

@@ -81,7 +81,10 @@ target_include_directories(CloudlessTests
 # Установка стандарта C++ 20
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET Cloudless PROPERTY CXX_STANDARD 20)
+  set_property(TARGET Cloudless PROPERTY CXX_STANDARD_REQUIRED ON)  
   set_property(TARGET CloudlessTests PROPERTY CXX_STANDARD 20)
+  set_property(TARGET CloudlessTests PROPERTY CXX_STANDARD_REQUIRED ON)
+
 endif()
 
 

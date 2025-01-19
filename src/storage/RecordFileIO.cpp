@@ -339,7 +339,7 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 		leftSiblingHeader.next = NOT_FOUND;
 		writeRecordHeader(leftSiblingOffset, leftSiblingHeader);		
 		unlockRecord(leftSiblingOffset, true);		
-		// add record to free list and mark as deleted		
+		// add record to free list and mark as deleted (contains headerMutex lock & record lock)				
 		addRecordToFreeList(currentPosition);		
 		{
 			// update storage header
@@ -788,7 +788,7 @@ void RecordFileIO::removeRecordFromFreeList(RecordHeader& freeRecord) {
 	if (!(freeRecord.bitFlags & RECORD_DELETED_FLAG)) {
 		std::cerr << "restoring already restored record\n";
 		//return;
-		//throw std::runtime_error("restoring already restored record");
+		throw std::runtime_error("restoring already restored record");
 	}
 
 	// Simplify namings and check
@@ -813,9 +813,11 @@ void RecordFileIO::removeRecordFromFreeList(RecordHeader& freeRecord) {
 		writeRecordHeader(rightSiblingOffset, rightSiblingHeader);
 		unlockRecord(leftSiblingOffset, true);
 		unlockRecord(rightSiblingOffset, true);		
-		headerMutex.lock();
-		storageHeader.totalFreeRecords--; // Decrement total free records
-		headerMutex.unlock();
+		{
+			headerMutex.lock();
+			storageHeader.totalFreeRecords--;
+			headerMutex.unlock();
+		}
 	}   // if left sibling exists and right is not
 	else if (leftSiblingExists) {                                    
 		// if removing last free record
@@ -824,10 +826,12 @@ void RecordFileIO::removeRecordFromFreeList(RecordHeader& freeRecord) {
 		leftSiblingHeader.next = NOT_FOUND;
 		writeRecordHeader(leftSiblingOffset, leftSiblingHeader);
 		unlockRecord(leftSiblingOffset, true);		
-		headerMutex.lock();
-		storageHeader.lastFreeRecord = leftSiblingOffset;				
-		storageHeader.totalFreeRecords--; // Decrement total free records
-		headerMutex.unlock();
+		{
+			headerMutex.lock();
+			storageHeader.lastFreeRecord = leftSiblingOffset;
+			storageHeader.totalFreeRecords--;
+			headerMutex.unlock();
+		}
 	}   // if right sibling exists and left is not
 	else if (rightSiblingExists) {                                   
 		// if removing first free record		
@@ -836,16 +840,18 @@ void RecordFileIO::removeRecordFromFreeList(RecordHeader& freeRecord) {
 		rightSiblingHeader.previous = NOT_FOUND;
 		writeRecordHeader(rightSiblingOffset, rightSiblingHeader);
 		unlockRecord(rightSiblingOffset, true);
-		headerMutex.lock();
-		storageHeader.firstFreeRecord = rightSiblingOffset;		
-		storageHeader.totalFreeRecords--; // Decrement total free records
-		headerMutex.unlock();
+		{
+			headerMutex.lock();
+			storageHeader.firstFreeRecord = rightSiblingOffset;
+			storageHeader.totalFreeRecords--;
+			headerMutex.unlock();
+		}
 	} else {                                                           
 		headerMutex.lock();
 		// If removing last free record
 		storageHeader.firstFreeRecord = NOT_FOUND;
 		storageHeader.lastFreeRecord = NOT_FOUND;		
-		storageHeader.totalFreeRecords--; // Decrement total free records
+		storageHeader.totalFreeRecords--; 
 		headerMutex.unlock();
 	}
 	
@@ -881,39 +887,39 @@ uint32_t RecordFileIO::checksum(const uint8_t* data, uint64_t length) {
 /**
 *  @brief Locks record by its offset in file
 *  @param[in] offset - record position in file
-*  @param[in] writeLock - true if unique lock, false if shared lock
+*  @param[in] exclusive - true if unique lock, false if shared lock
 */
-void RecordFileIO::lockRecord(uint64_t offset, bool writeLock) {
-	// lock map
-	bool positionNotFound = false;
-	
-	// search record position in map
-	mapMutex.lock_shared();
-	auto it = recordLocks.find(offset);
-	positionNotFound = (it == recordLocks.end());
-	mapMutex.unlock_shared();
+void RecordFileIO::lockRecord(uint64_t offset, bool exclusive) {
+	std::shared_ptr<RecordLock> recordLock;
 
-	// if record position is not found in map
-	mapMutex.lock();
-	if (positionNotFound) {				
-		// create kay/value pair
-		auto& recordLock = recordLocks[offset];
-		
-		recordLock.counter.fetch_add(1);		
-		if (writeLock) 
-			recordLock.mutex.lock();
-		else 
-			recordLock.mutex.lock_shared();
-	} else { 
-		// if record position is found in map
-		auto& recordLock = it->second;
-		recordLock.counter.fetch_add(1);
-		if (writeLock) 
-			recordLock.mutex.lock(); 
-		else 
-			recordLock.mutex.lock_shared();
+	{
+		std::shared_lock<std::shared_mutex> mapLock(mapMutex);
+		auto it = recordLocks.find(offset);
+		if (it != recordLocks.end()) {
+			recordLock = it->second;
+			if (recordLock) recordLock->counter.fetch_add(1);
+		}
+	} 
+
+	if (!recordLock) {
+		std::unique_lock<std::shared_mutex> mapLock(mapMutex);
+		auto it = recordLocks.find(offset);
+		if (it == recordLocks.end()) {
+			recordLock = std::make_shared<RecordLock>();
+			recordLocks[offset] = recordLock;
+			recordLock->counter.fetch_add(1);
+		} else {
+			recordLock = it->second;
+			recordLock->counter.fetch_add(1);
+		}
 	}
-	mapMutex.unlock();
+
+	if (exclusive) {		
+		recordLock->mutex.lock();		
+	} else {		
+		recordLock->mutex.lock_shared();
+	}
+	
 }
 
 
@@ -921,33 +927,34 @@ void RecordFileIO::lockRecord(uint64_t offset, bool writeLock) {
 /**
 *  @brief Unlocks record by its offset in file
 *  @param[in] offset - record position in file
-*  @param[in] writeLock - true if unique lock, false if shared lock
+*  @param[in] exclusive - true if unique lock, false if shared lock
 */
-void RecordFileIO::unlockRecord(uint64_t offset, bool writeLock) {
-			
-	// shared lock map
-	mapMutex.lock_shared();
-	// search record position in map
-	auto it = recordLocks.find(offset);
-	// if record position is not found in map
-	if (it == recordLocks.end()) return;
-	// if record position is found in map
-	RecordLock& recordLock = it->second;	
-	// shared unlock map
-	mapMutex.unlock_shared();
+void RecordFileIO::unlockRecord(uint64_t offset, bool exclusive) {
+	std::shared_ptr<RecordLock> recordLock;
 
-	mapMutex.lock();
-	if (writeLock) 
-		recordLock.mutex.unlock(); 
-	else 
-		recordLock.mutex.unlock_shared();
-	
-	// if it last lock - delete it from map
-	
-	//if (recordLock.counter.fetch_sub(1) <= 1) {		
-	//	recordLocks.erase(it);		
-	//}
-	mapMutex.unlock();
+	{
+		std::shared_lock<std::shared_mutex> mapLock(mapMutex);
+		auto it = recordLocks.find(offset);
+		if (it == recordLocks.end()) return;
+		recordLock = it->second;
+		if (!recordLock) return;
+	}
+
+	if (exclusive) {
+		recordLock->mutex.unlock();		
+	} else {
+		recordLock->mutex.unlock_shared();
+	}
+		
+	{
+		std::unique_lock<std::shared_mutex> mapLock(mapMutex);		
+		if (recordLock->counter.fetch_sub(1) == 1) {
+			auto it = recordLocks.find(offset);
+			if (it != recordLocks.end()) {
+				recordLocks.erase(offset);
+			}
+		}
+	}
 	
 }
 

@@ -68,12 +68,12 @@ void TestRecordFileIO::cleanup() {
 bool TestRecordFileIO::singlethreaded() {
 	auto startTime = std::chrono::high_resolution_clock::now();
 	generateData(samplesCount);
-//	readAscending(false);
-//	removeEvenRecords(false);
-//	readDescending(false);
-//	insertNewRecords(samplesCount / 2);
 	readAscending(false);
-//	editRecords(false);
+	removeEvenRecords(false);
+	readDescending(false);
+	insertNewRecords(samplesCount / 2);
+	readAscending(false);
+	editRecords(false);
 	db->flush();
 	auto endTime = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime);
@@ -102,14 +102,14 @@ bool TestRecordFileIO::multithreaded() {
 
 				// every 3rd thread is writer
 				if (i % 3 == 0) {
-				//	generateData(batchSize);
-					readDescending(false);
-				//	removeEvenRecords(false);
-				//	insertNewRecords(batchSize / 2);					
+					generateData(batchSize);
+					//editRecords(false);
+					//readDescending(false);
+				    //removeEvenRecords(false);
+					//insertNewRecords(batchSize / 2);					
 				} else {
-				//	readAscending(false);
-				//	editRecords(false);
-					readAscending(false);
+					readAscending(false);					
+					//readAscending(false);
 				}				
 			});
 		}		
@@ -161,7 +161,7 @@ bool TestRecordFileIO::generateData(size_t recordsCount) {
 		memset(buffer, 0, sizeof(buffer));
 		memcpy(buffer, ss.str().c_str(), length);		
 		if (db->createRecord(buffer, length + padding) != nullptr) {
-			bytesWritten += (length + padding);
+			bytesWritten += (size_t) (length + padding);
 		}
 		else {
 			result = false;

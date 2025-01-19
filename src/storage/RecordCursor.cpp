@@ -94,7 +94,7 @@ uint64_t RecordCursor::getPosition() {
 bool RecordCursor::setPosition(uint64_t offset) {
 	
 	// Try to read record header
-	RecordHeader header;
+	RecordHeader header{};
 	{
 		std::unique_lock lock(cursorMutex);
 		recordFile.lockRecord(offset, false);
@@ -216,15 +216,23 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 	
 	uint64_t bytesToRead;
 	uint64_t dataOffset;
+	bool invalidated = false;
 	{
 		//std::shared_lock lock(recordFile.storageMutex);
 		recordFile.lockRecord(currentPosition, false);
-		recordFile.readRecordHeader(currentPosition, recordHeader);
-		bytesToRead = std::min(recordHeader.dataLength, length);
-		dataOffset = currentPosition + RECORD_HEADER_SIZE;
-		recordFile.cachedFile.read(dataOffset, data, bytesToRead);
+		if (recordFile.readRecordHeader(currentPosition, recordHeader) != NOT_FOUND) {
+			bytesToRead = std::min(recordHeader.dataLength, length);
+			dataOffset = currentPosition + RECORD_HEADER_SIZE;
+			recordFile.cachedFile.read(dataOffset, data, bytesToRead);
+		} else invalidated = true;		
 		recordFile.unlockRecord(currentPosition, false);
 	}
+
+	if (invalidated) {
+		currentPosition = NOT_FOUND;
+		return false;
+	}
+
 	// check data consistency by checksum
 	uint32_t dataCheckSum = recordFile.checksum((uint8_t*)data, bytesToRead);
 	if (dataCheckSum != recordHeader.dataChecksum) {
