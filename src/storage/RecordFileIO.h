@@ -133,6 +133,8 @@ namespace Cloudless {
 			
 			uint64_t readRecordHeader(uint64_t offset, RecordHeader& result);
 			uint64_t writeRecordHeader(uint64_t offset, RecordHeader& header);
+			uint64_t readRecordData(uint64_t offset, void* data, uint32_t length);
+			uint64_t writeRecordData(uint64_t offset, const void* data, uint32_t length);
 
 			uint64_t allocateRecord(uint32_t capacity, RecordHeader& result);
 			uint64_t createFirstRecord(uint32_t capacity, RecordHeader& result);

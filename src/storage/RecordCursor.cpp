@@ -92,20 +92,17 @@ uint64_t RecordCursor::getPosition() {
 * @return true - if offset points to consistent record, false - otherwise
 */
 bool RecordCursor::setPosition(uint64_t offset) {
+
+	std::unique_lock lock(cursorMutex);
+	recordFile.lockRecord(offset, false);
+	uint64_t recPos = recordFile.readRecordHeader(offset, recordHeader);
+	recordFile.unlockRecord(offset, false);
+	if (recPos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) {
+		currentPosition = NOT_FOUND;
+		return false;
+	}
+	currentPosition = offset;
 	
-	// Try to read record header
-	RecordHeader header{};
-	{
-		std::unique_lock lock(cursorMutex);
-		recordFile.lockRecord(offset, false);
-		uint64_t recPos = recordFile.readRecordHeader(offset, recordHeader);
-		recordFile.unlockRecord(offset, false);
-		if (recPos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) {
-			currentPosition = NOT_FOUND;
-			return false;
-		}
-		currentPosition = offset;
-	}	
 	return true;
 }
 
@@ -208,43 +205,9 @@ uint64_t RecordCursor::getPrevPosition() {
 * @return returns true or false if data corrupted
 */
 bool RecordCursor::getRecordData(void* data, uint32_t length) {	
-	
 	// Lock cursor for reading
 	std::shared_lock lock(cursorMutex);
-
-	if (currentPosition == NOT_FOUND || length == 0) {
-		std::cout << "Record header invalidated before update\n";
-		return false;
-	}
-	
-	uint64_t bytesToRead;
-	uint64_t dataOffset;
-	bool invalidated = false;
-	{
-		//std::shared_lock lock(recordFile.storageMutex);
-		recordFile.lockRecord(currentPosition, false);
-		if (recordFile.readRecordHeader(currentPosition, recordHeader) != NOT_FOUND) {
-			bytesToRead = std::min(recordHeader.dataLength, length);
-			dataOffset = currentPosition + RECORD_HEADER_SIZE;
-			recordFile.cachedFile.read(dataOffset, data, bytesToRead);
-		} else invalidated = true;		
-		recordFile.unlockRecord(currentPosition, false);
-	}
-
-	if (invalidated) {
-		currentPosition = NOT_FOUND;
-		std::cout << "Record header invalidated after update\n";
-		return false;
-	}
-
-	// check data consistency by checksum
-	uint32_t dataCheckSum = recordFile.checksum((uint8_t*)data, bytesToRead);
-	if (dataCheckSum != recordHeader.dataChecksum) {
-		std::cout << "checksum not equal\n";
-		return false;
-	}
-	
-	return true;
+	return recordFile.readRecordData(currentPosition, data, length) != NOT_FOUND;
 }
 
 
@@ -255,104 +218,11 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 * then record moves to new place with appropriate capacity.
 * @param[in] data - pointer to new data
 * @param[in] length - length of data in bytes
-* @param[out] result - updated record header information
 * @return returns true or false if fails
 */
 bool RecordCursor::setRecordData(const void* data, uint32_t length) {
-		
 	// Lock cursor for changes
 	std::unique_lock lockCursor(cursorMutex);	
-
-	if (recordFile.isReadOnly() || currentPosition == NOT_FOUND) return false;
-
-	uint64_t bytesWritten;
-
-	// Lock storage
-	//std::unique_lock lockStorage(recordFile.storageMutex);
-
-	// Update header and check is it still valid
-	recordFile.lockRecord(currentPosition, true);
-	uint64_t pos = recordFile.readRecordHeader(currentPosition, recordHeader);	
-	
-	if (pos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) {		
-		recordFile.unlockRecord(currentPosition, true);
-		return false;
-	}
-	
-
-	//------------------------------------------------------------------	
-	// if there is enough capacity in record
-	//------------------------------------------------------------------
-	if (length <= recordHeader.recordCapacity) {
-		// Update header data length info
-		recordHeader.dataLength = length;
-		// Update data and header checksum
-		recordHeader.dataChecksum = recordFile.checksum((uint8_t*)data, length);		
-		recordHeader.headChecksum = recordFile.checksum((uint8_t*)&recordHeader, RECORD_HEADER_PAYLOAD_SIZE);				
-		{	
-			bytesWritten = recordFile.cachedFile.write(currentPosition, &recordHeader, RECORD_HEADER_SIZE);
-			bytesWritten += recordFile.cachedFile.write(currentPosition + RECORD_HEADER_SIZE, data, length);
-			recordFile.unlockRecord(currentPosition, true);
-			return bytesWritten == (RECORD_HEADER_SIZE + length);
-		}			
-	}
-
-	//------------------------------------------------------------------	
-	// if there is not enough record capacity, then move record	
-	//------------------------------------------------------------------	
-	RecordHeader newRecordHeader;
-	uint64_t offset;	
-	{
-		// lock storage find free record of required length
-		offset = recordFile.allocateRecord(length, newRecordHeader);
-		if (offset == NOT_FOUND) {
-			recordFile.unlockRecord(currentPosition, true);
-			return false;
-		} else {
-			recordFile.lockRecord(offset, true);
-		}
-	}	
-
-	// Copy record header fields, update data length and checksum
-	newRecordHeader.next = recordHeader.next;
-	newRecordHeader.previous = recordHeader.previous;
-	newRecordHeader.dataLength = length;
-	newRecordHeader.dataChecksum = recordFile.checksum((uint8_t*)data, length);	
-	newRecordHeader.headChecksum = recordFile.checksum((uint8_t*)&newRecordHeader, RECORD_HEADER_PAYLOAD_SIZE);
-		
-	{
-		
-		
-		// Unlock record
-		recordFile.unlockRecord(currentPosition, true);
-		
-		// TODO: Data race possible - may be locking is more suitable on the public methods level that on protected ones
-		
-		// Delete old record and add it to the free records list		
-		if (!recordFile.addRecordToFreeList(currentPosition)) return NOT_FOUND;
-		// if this is first record, then update storage header
-		if (recordHeader.previous == NOT_FOUND) {
-			{
-				std::unique_lock lock(recordFile.headerMutex);
-				recordFile.storageHeader.firstRecord = offset;
-			}
-			recordFile.writeStorageHeader();
-		};
-
-		// TODO: Data race possible - header updated before actual data is written to the record
-
-		// Write new record header and data to the storage file	
-		recordFile.lockRecord(offset, true);	
-		bytesWritten = recordFile.cachedFile.write(offset, &newRecordHeader, RECORD_HEADER_SIZE);
-		bytesWritten += recordFile.cachedFile.write(offset + RECORD_HEADER_SIZE, data, length);
-		recordFile.unlockRecord(offset, true);
-	}
-
-	// Update current record and position
-	memcpy(&recordHeader, &newRecordHeader, RECORD_HEADER_SIZE);
-	currentPosition = offset;
-
-	return bytesWritten == (RECORD_HEADER_SIZE + length);
-
+	return recordFile.writeRecordData(currentPosition, data, length) != NOT_FOUND;
 }
 
