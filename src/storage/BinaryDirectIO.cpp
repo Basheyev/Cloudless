@@ -16,6 +16,8 @@
 #include "CachedFileIO.h"
 
 
+// TODO: write POSIX implementation for concurrent IO - pread/pwrite
+
 using namespace Cloudless::Storage;
 
 
