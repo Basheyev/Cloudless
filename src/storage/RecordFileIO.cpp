@@ -892,7 +892,7 @@ uint32_t RecordFileIO::checksum(const uint8_t* data, uint64_t length) {
 void RecordFileIO::lockRecord(uint64_t offset, bool exclusive) {
 	std::shared_ptr<RecordLock> recordLock;
 
-	{
+	{ 
 		std::shared_lock<std::shared_mutex> mapLock(mapMutex);
 		auto it = recordLocks.find(offset);
 		if (it != recordLocks.end()) {

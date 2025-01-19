@@ -267,10 +267,13 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 	//std::unique_lock lockStorage(recordFile.storageMutex);
 
 	// Update header and check is it still valid
-	recordFile.lockRecord(currentPosition, false);
-	uint64_t pos = recordFile.readRecordHeader(currentPosition, recordHeader);
-	recordFile.unlockRecord(currentPosition, false);
-	if (pos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) return false;
+	recordFile.lockRecord(currentPosition, true);
+	uint64_t pos = recordFile.readRecordHeader(currentPosition, recordHeader);	
+	
+	if (pos == NOT_FOUND || recordHeader.bitFlags & RECORD_DELETED_FLAG) {		
+		recordFile.unlockRecord(currentPosition, true);
+		return false;
+	}
 	
 
 	//------------------------------------------------------------------	
@@ -282,11 +285,10 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 		// Update data and header checksum
 		recordHeader.dataChecksum = recordFile.checksum((uint8_t*)data, length);		
 		recordHeader.headChecksum = recordFile.checksum((uint8_t*)&recordHeader, RECORD_HEADER_PAYLOAD_SIZE);				
-		{
-			// Lock storage and write record header and data	
-			//std::unique_lock lock(recordFile.storageMutex);						
+		{	
 			bytesWritten = recordFile.cachedFile.write(currentPosition, &recordHeader, RECORD_HEADER_SIZE);
 			bytesWritten += recordFile.cachedFile.write(currentPosition + RECORD_HEADER_SIZE, data, length);
+			recordFile.unlockRecord(currentPosition, true);
 			return bytesWritten == (RECORD_HEADER_SIZE + length);
 		}			
 	}
@@ -299,7 +301,12 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 	{
 		// lock storage find free record of required length
 		offset = recordFile.allocateRecord(length, newRecordHeader);
-		if (offset == NOT_FOUND) return false;
+		if (offset == NOT_FOUND) {
+			recordFile.unlockRecord(currentPosition, true);
+			return false;
+		} else {
+			recordFile.lockRecord(offset, true);
+		}
 	}	
 
 	// Copy record header fields, update data length and checksum
@@ -310,9 +317,14 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 	newRecordHeader.headChecksum = recordFile.checksum((uint8_t*)&newRecordHeader, RECORD_HEADER_PAYLOAD_SIZE);
 		
 	{
-		// Lock storage 
-
-		// Delete old record and add it to the free records list
+		
+		
+		// Unlock record
+		recordFile.unlockRecord(currentPosition, true);
+		
+		// TODO: Data race possible - may be locking is more suitable on the public methods level that on protected ones
+		
+		// Delete old record and add it to the free records list		
 		if (!recordFile.addRecordToFreeList(currentPosition)) return NOT_FOUND;
 		// if this is first record, then update storage header
 		if (recordHeader.previous == NOT_FOUND) {
@@ -322,6 +334,8 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 			}
 			recordFile.writeStorageHeader();
 		};
+
+		// TODO: Data race possible - header updated before actual data is written to the record
 
 		// Write new record header and data to the storage file	
 		recordFile.lockRecord(offset, true);	

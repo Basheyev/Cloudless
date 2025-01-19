@@ -102,9 +102,9 @@ bool TestRecordFileIO::multithreaded() {
 
 				// every 3rd thread is writer
 				if (i % 3 == 0) {
-					generateData(batchSize);
+					generateData(batchSize);					
+					readDescending(false);
 					//editRecords(false);
-					//readDescending(false);
 				    //removeEvenRecords(false);
 					//insertNewRecords(batchSize / 2);					
 				} else {

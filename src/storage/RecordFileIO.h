@@ -82,13 +82,13 @@ namespace Cloudless {
 		constexpr uint32_t RECORD_HEADER_PAYLOAD_SIZE = RECORD_HEADER_SIZE - sizeof(RecordHeader::headChecksum);
 
 		//----------------------------------------------------------------------------
-		// Record lock structure (40 bytes)
+		// Record lock structure
 		//----------------------------------------------------------------------------	
 		struct RecordLock {			
 			std::shared_mutex     mutex;
 			std::atomic<int32_t>  counter;						
 		};
-
+				
 		//----------------------------------------------------------------------------
 		// RecordFileIO
 		//----------------------------------------------------------------------------
