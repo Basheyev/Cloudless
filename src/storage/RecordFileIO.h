@@ -136,10 +136,10 @@ namespace Cloudless {
 			uint64_t readRecordData(uint64_t offset, void* data, uint32_t length);
 			uint64_t writeRecordData(uint64_t offset, const void* data, uint32_t length);
 
-			uint64_t allocateRecord(uint32_t capacity, RecordHeader& result);
-			uint64_t createFirstRecord(uint32_t capacity, RecordHeader& result);
-			uint64_t appendNewRecord(uint32_t capacity, RecordHeader& result);
-			uint64_t getFromFreeList(uint32_t capacity, RecordHeader& result);
+			uint64_t allocateRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length);
+			uint64_t createFirstRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length);
+			uint64_t appendNewRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length);
+			uint64_t getFromFreeList(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length);
 
 			bool     addRecordToFreeList(uint64_t offset);
 			void     removeRecordFromFreeList(RecordHeader& freeRecord);

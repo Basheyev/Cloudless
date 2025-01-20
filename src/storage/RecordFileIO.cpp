@@ -155,30 +155,13 @@ uint64_t RecordFileIO::getTotalFreeRecords() {
 std::shared_ptr<RecordCursor> RecordFileIO::createRecord(const void* data, uint32_t length) {
 
 	// Check if file writes are permitted
-	//{
-	//	std::unique_lock lockStorage(storageMutex);
-		if (cachedFile.isReadOnly()) return nullptr;
-	//}
+	if (cachedFile.isReadOnly()) return nullptr;
 	
 	// Allocate new record and link to last record
 	RecordHeader newRecordHeader;
-	uint64_t recordPosition = allocateRecord(length, newRecordHeader);
+	uint64_t recordPosition = allocateRecord(length, newRecordHeader, data, length);
 	if (recordPosition == NOT_FOUND) return nullptr;
-		
-	// Fill record header fields
-	// FYI: 'previous' field already pointing to last record
-	newRecordHeader.next = NOT_FOUND;                       
-	newRecordHeader.dataLength = length;
-	newRecordHeader.bitFlags = 0;
-	newRecordHeader.dataChecksum = checksum((uint8_t*) data, length);	
-	newRecordHeader.headChecksum = checksum((uint8_t*)&newRecordHeader, RECORD_HEADER_PAYLOAD_SIZE);
-
-	// Write record header and data to the storage file		
-	lockRecord(recordPosition, true);
-	cachedFile.write(recordPosition, &newRecordHeader, RECORD_HEADER_SIZE);
-	cachedFile.write(recordPosition + RECORD_HEADER_SIZE, data, length);
-	unlockRecord(recordPosition, true);
-
+	
 	// Create cursor and return it
 	std::shared_ptr<RecordCursor> recordCursor;
 	recordCursor = std::make_shared<RecordCursor>(*this, newRecordHeader, recordPosition);
@@ -280,10 +263,6 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 
 	// FYI: cursor::isValid locks storageMutex so do it before unique lock
 	if (cursor == nullptr || cachedFile.isReadOnly()) return false;
-
-	// Lock storage and cursor for exclusive writing
-	//std::unique_lock lockStorage(storageMutex);		
-
 
 	std::unique_lock lockCursor(cursor->cursorMutex);
 
@@ -549,7 +528,10 @@ uint64_t RecordFileIO::writeRecordHeader(uint64_t offset, RecordHeader& header) 
 */
 uint64_t RecordFileIO::readRecordData(uint64_t offset, void* data, uint32_t length) {
 	
-	if (offset == NOT_FOUND || data == nullptr || length == 0) return NOT_FOUND;
+	if (offset == NOT_FOUND || data == nullptr || length == 0) {
+		std::cout << "Record data read (offset == NOT_FOUND || data == nullptr || length == 0)\n";
+		return NOT_FOUND;
+	}
 
 	RecordHeader recordHeader;
 	uint64_t bytesToRead;
@@ -564,11 +546,17 @@ uint64_t RecordFileIO::readRecordData(uint64_t offset, void* data, uint32_t leng
 	} else invalidated = true;
 	unlockRecord(offset, false);
 	
-	if (invalidated) return NOT_FOUND;
+	if (invalidated) {
+		std::cout << "Record header read failed \n";
+		return NOT_FOUND;
+	}
 
 	// check data consistency by checksum
 	uint32_t dataCheckSum = checksum((uint8_t*)data, bytesToRead);
-	if (dataCheckSum != recordHeader.dataChecksum) return NOT_FOUND;
+	if (dataCheckSum != recordHeader.dataChecksum) {
+		std::cout << "Record data read failed \n";
+		return NOT_FOUND;
+	}
 
 	return offset;
 }
@@ -626,8 +614,8 @@ uint64_t RecordFileIO::writeRecordData(uint64_t offset, const void* data, uint32
 	RecordHeader newRecordHeader;
 	uint64_t newOffset;
 	{
-		// lock storage find free record of required length
-		newOffset = allocateRecord(length, newRecordHeader);
+		// lock storage find free record of required length and write it
+		newOffset = allocateRecord(length, newRecordHeader, data, length);
 		if (newOffset == NOT_FOUND) {
 			unlockRecord(offset, true);
 			return NOT_FOUND;
@@ -635,40 +623,7 @@ uint64_t RecordFileIO::writeRecordData(uint64_t offset, const void* data, uint32
 			lockRecord(newOffset, true);
 		}
 	}
-
-	// Copy record header fields, update data length and checksum
-	newRecordHeader.next = recordHeader.next;
-	newRecordHeader.previous = recordHeader.previous;
-	newRecordHeader.dataLength = length;
-	newRecordHeader.dataChecksum = checksum((uint8_t*)data, length);
-	newRecordHeader.headChecksum = checksum((uint8_t*)&newRecordHeader, RECORD_HEADER_PAYLOAD_SIZE);
-
-	
-	// Unlock record
-	unlockRecord(offset, true);
-
-	// TODO: Data race possible - may be locking is more suitable on the public methods level that on protected ones
-
-	// Delete old record and add it to the free records list		
-	if (!addRecordToFreeList(offset)) return NOT_FOUND;
-	// if this is first record, then update storage header
-	if (recordHeader.previous == NOT_FOUND) {
-		{
-			std::unique_lock lock(headerMutex);
-			storageHeader.firstRecord = newOffset;
-		}
-		writeStorageHeader();
-	};
-
-	// TODO: Data race possible - header updated before actual data is written to the record
-
-	// Write new record header and data to the storage file	
-	lockRecord(newOffset, true);
-	bytesWritten = cachedFile.write(newOffset, &newRecordHeader, RECORD_HEADER_SIZE);
-	bytesWritten += cachedFile.write(newOffset + RECORD_HEADER_SIZE, data, length);
-	unlockRecord(newOffset, true);
-	
-
+		
 	// Update current record and position
 	memcpy(&recordHeader, &newRecordHeader, RECORD_HEADER_SIZE);
 	
@@ -687,9 +642,11 @@ uint64_t RecordFileIO::writeRecordData(uint64_t offset, const void* data, uint32
 *  @brief Allocates new record from free records list or appends to the ond of file
 *  @param[in] capacity - requested capacity of record
 *  @param[out] result  - record header of created new record
+*  @param[in] data     - record data
+*  @param[in] length   - record data length
 *  @return offset of record in the storage file
 */
-uint64_t RecordFileIO::allocateRecord(uint32_t capacity, RecordHeader& result) {
+uint64_t RecordFileIO::allocateRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length) {
 
 	bool noFreeRecords;
 	{
@@ -700,16 +657,16 @@ uint64_t RecordFileIO::allocateRecord(uint32_t capacity, RecordHeader& result) {
 	// if there is no free records yet
 	if (noFreeRecords) {
 		// if there is no records at all create first record
-		return createFirstRecord(capacity, result);
+		return createFirstRecord(capacity, result, data, length);
 	} else {
 		// look up free list for record of suitable capacity
-		uint64_t offset = getFromFreeList(capacity, result);
+		uint64_t offset = getFromFreeList(capacity, result, data, length);
 		// if found, then just return it
 		if (offset != NOT_FOUND) return offset;
 	}
 		
 	// if there is no free records, append to the end of file	
-	return appendNewRecord(capacity, result);
+	return appendNewRecord(capacity, result, data, length);
 
 }
 
@@ -721,25 +678,35 @@ uint64_t RecordFileIO::allocateRecord(uint32_t capacity, RecordHeader& result) {
 *  @param[out] result  - record header of created new record
 *  @return offset of record in the storage file
 */
-uint64_t RecordFileIO::createFirstRecord(uint32_t capacity, RecordHeader& result) {
-	// clear record header
-	memset(&result, 0, RECORD_HEADER_SIZE);
-	// set value to capacity
-	result.next = NOT_FOUND;
-	result.previous = NOT_FOUND;
-	result.recordCapacity = capacity;
-	result.dataLength = 0;
+uint64_t RecordFileIO::createFirstRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length) {
+		
 	// calculate offset right after Storage header
 	uint64_t offset = STORAGE_HEADER_SIZE;
+
+	// Fill record header fields
+	result.next = NOT_FOUND;
+	result.previous = NOT_FOUND;
+	result.dataLength = length;
+	result.recordCapacity = capacity;
+	result.bitFlags = 0;
+	result.dataChecksum = checksum((uint8_t*)data, length);
+	result.headChecksum = checksum((uint8_t*)&result, RECORD_HEADER_PAYLOAD_SIZE);
 
 	// update storage header
 	{
 		std::unique_lock lock(headerMutex);
 		storageHeader.firstRecord = offset;
 		storageHeader.lastRecord = offset;
-		storageHeader.endOfData += RECORD_HEADER_SIZE + capacity;
+		storageHeader.endOfData = offset + RECORD_HEADER_SIZE + capacity;
 		storageHeader.totalRecords++;
+
+		lockRecord(offset, true);
+		cachedFile.write(offset, &result, RECORD_HEADER_SIZE);
+		cachedFile.write(offset + RECORD_HEADER_SIZE, data, length);
+		unlockRecord(offset, true);
 	}
+
+	// Write record header and data to the storage file		
 	writeStorageHeader();
 	
 	return offset;
@@ -754,7 +721,7 @@ uint64_t RecordFileIO::createFirstRecord(uint32_t capacity, RecordHeader& result
 *  @param[out] result  - record header of created new record
 *  @return offset of record in the storage file
 */
-uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result) {
+uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length) {
 
 	if (capacity == 0) return NOT_FOUND;
 		
@@ -763,30 +730,42 @@ uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result) 
 	uint64_t freeRecordOffset;
 	uint64_t lastRecordOffset;
 
+	// fill record header
+	result.next = NOT_FOUND;	
+	result.recordCapacity = capacity;
+	result.bitFlags = 0;
+	result.dataLength = length;
+	result.dataChecksum = checksum((uint8_t*)data, length);	
+
 	// add record to the end of data and update storage header
 	{
 		std::unique_lock lock(headerMutex);
 		lastRecordOffset = storageHeader.lastRecord;
 		freeRecordOffset = storageHeader.endOfData;
 		storageHeader.lastRecord = freeRecordOffset;
-		storageHeader.endOfData += RECORD_HEADER_SIZE + capacity;
+		storageHeader.endOfData = freeRecordOffset + RECORD_HEADER_SIZE + capacity;
 		storageHeader.totalRecords++;
+
+		// connect to previous record
+		result.previous = lastRecordOffset;
+		result.headChecksum = checksum((uint8_t*)&result, RECORD_HEADER_PAYLOAD_SIZE);
+
+		// update last record and connect to new record
+		lockRecord(lastRecordOffset, true);
+		readRecordHeader(lastRecordOffset, lastRecord);
+		lastRecord.next = freeRecordOffset;
+		writeRecordHeader(lastRecordOffset, lastRecord);
+		unlockRecord(lastRecordOffset, true);
+
+		// write data of new appended record
+		lockRecord(freeRecordOffset, true);
+		cachedFile.write(freeRecordOffset, &result, RECORD_HEADER_SIZE);
+		cachedFile.write(freeRecordOffset + RECORD_HEADER_SIZE, data, length);
+		unlockRecord(freeRecordOffset, true);
+
 	}
 	writeStorageHeader();
 
-	// update last record and connect to new record
-	lockRecord(lastRecordOffset, true);
-	readRecordHeader(lastRecordOffset, lastRecord);
-	lastRecord.next = freeRecordOffset;
-	writeRecordHeader(lastRecordOffset, lastRecord);
-	unlockRecord(lastRecordOffset, true);
-
-	result.next = NOT_FOUND;
-	result.previous = lastRecordOffset;
-	result.recordCapacity = capacity;
-	result.bitFlags = 0;
-	result.dataLength = 0;
-		
 	return freeRecordOffset;
 }
 
@@ -804,7 +783,7 @@ uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result) 
 *  @param[out] result  - record header of created new record
 *  @return offset of record in the storage file
 */
-uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result) {
+uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length) {
 
 	RecordHeader freeRecord;
 	uint64_t previousRecordPos;
@@ -837,29 +816,44 @@ uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result) 
 			// update last record to point to new record
 			RecordHeader previousRecord;
 
+			// connect new record with previous
+			result.next = NOT_FOUND;			
+			result.recordCapacity = freeRecord.recordCapacity;
+			result.dataLength = length;
+			result.dataChecksum = checksum((uint8_t*)data, length);
+			// turn off "record deleted" bit
+			result.bitFlags = freeRecord.bitFlags & (~RECORD_DELETED_FLAG);
+
 			// update storage header last record to new record
 			{
 				std::unique_lock lock(headerMutex);
 				previousRecordPos = storageHeader.lastRecord;
+
+				// connect to previous record
+				result.previous = previousRecordPos;								
+				result.headChecksum = checksum((uint8_t*)&result, RECORD_HEADER_PAYLOAD_SIZE);
+
 				lockRecord(previousRecordPos, true);
 				readRecordHeader(previousRecordPos, previousRecord);
 				previousRecord.next = freeRecordOffset;
 				writeRecordHeader(previousRecordPos, previousRecord);
 				unlockRecord(previousRecordPos, true);
+
+				// unlock shared lock
+				unlockRecord(freeRecordOffset, false);
+
+				// write data of new appended record				
+				lockRecord(freeRecordOffset, true);
+				cachedFile.write(freeRecordOffset, &result, RECORD_HEADER_SIZE);
+				cachedFile.write(freeRecordOffset + RECORD_HEADER_SIZE, data, length);
+				unlockRecord(freeRecordOffset, true);
+
 				storageHeader.lastRecord = freeRecordOffset;
 				storageHeader.totalRecords++;
 			}
+		
 			writeStorageHeader();
-
-			// connect new record with previous
-			result.next = NOT_FOUND;
-			result.previous = previousRecordPos;
-			result.recordCapacity = freeRecord.recordCapacity;
-			result.dataLength = 0;
-			// turn off "record deleted" bit
-			result.bitFlags = freeRecord.bitFlags & (~RECORD_DELETED_FLAG);
-
-			unlockRecord(freeRecordOffset, false);
+			
 			return freeRecordOffset;
 		}
 		

@@ -115,9 +115,12 @@ bool RecordCursor::next() {
 	uint64_t nextPos;
 	{
 		std::shared_lock lock(cursorMutex);
-		if (currentPosition == NOT_FOUND || recordHeader.next == NOT_FOUND) {
-			return false;
-		}
+		if (currentPosition == NOT_FOUND || recordHeader.next == NOT_FOUND) return false;
+		
+		recordFile.lockRecord(currentPosition, false);
+		uint64_t recPos = recordFile.readRecordHeader(currentPosition, recordHeader);
+		recordFile.unlockRecord(currentPosition, false);
+
 		nextPos = recordHeader.next;
 		{
 			// check if we reached the last record
@@ -140,7 +143,13 @@ bool RecordCursor::previous() {
 	uint64_t prevPos;
 	{
 		std::shared_lock lock(cursorMutex);		
+		
 		if (currentPosition == NOT_FOUND || recordHeader.previous == NOT_FOUND) return false;
+
+		recordFile.lockRecord(currentPosition, false);
+		uint64_t recPos = recordFile.readRecordHeader(currentPosition, recordHeader);
+		recordFile.unlockRecord(currentPosition, false);
+				
 		prevPos = recordHeader.previous;
 		{
 			// check if we reached the first record
