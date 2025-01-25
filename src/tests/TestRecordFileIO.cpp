@@ -22,7 +22,7 @@ std::string TestRecordFileIO::getName() const {
 
 void TestRecordFileIO::init() {
 	fileName = (char*)"records.bin";
-	samplesCount = 10000;
+	samplesCount = 100000;
 
 	// Functional test
 	if (std::filesystem::exists(fileName)) {
@@ -41,7 +41,7 @@ void TestRecordFileIO::init() {
 void TestRecordFileIO::execute() {
 		
 
-	singlethreaded();
+//	singlethreaded();
 	multithreaded();
 
 	std::stringstream ss;
@@ -100,17 +100,20 @@ bool TestRecordFileIO::multithreaded() {
 		for (uint64_t i = 0; i < batchesCount; i++) {
 			workers.emplace_back([this, i, batchSize]() {		
 
-				// every 3rd thread is writer
-				if (i % 3 == 0) {
+				// every 2rd thread is writer
+				if (i % 2 == 0) {
+
 					generateData(batchSize);					
 					readDescending(false);
-					//editRecords(false);
+					editRecords(false);
 				    //removeEvenRecords(false);
 					//insertNewRecords(batchSize / 2);					
 				} else {
+					//generateData(batchSize);
 					readAscending(false);					
-					//readAscending(false);
-				}				
+					readDescending(false);
+				}	
+
 			});
 		}		
 
@@ -149,7 +152,7 @@ bool TestRecordFileIO::generateData(size_t recordsCount) {
 	size_t bytesWritten = 0;
 	uint32_t length = 0;		
 	uint32_t randomNumber;	
-	uint32_t padding = 16;
+	uint32_t padding = 0;
 	bool result = true;
 
 	for (size_t i = 0; i < recordsCount; i++) {
@@ -212,7 +215,7 @@ bool TestRecordFileIO::readAscending(bool verbose) {
 		uint32_t length = cursor->getDataLength();
 		prev = cursor->getPrevPosition();
 		next = cursor->getNextPosition();		
-		if (!cursor->getRecordData(buffer, length)) {
+		if (!cursor->getRecordData(buffer)) {
 			std::unique_lock lock(outputLock);
 			std::cout << "Record corrupt at " << counter << " record (ascending)\n";
 			break;
@@ -273,15 +276,15 @@ bool TestRecordFileIO::readDescending(bool verbose) {
 
 	do {
 		uint64_t pos = cursor->getPosition();
-		if (!cursor->isValid()) {
+		/*if (!cursor->isValid()) {
 			std::unique_lock lock(outputLock);
 			std::cout << "Cursor invalidated at " << counter << " record while reading descending\n";
 			break;
-		}
+		}*/
 		uint32_t length = cursor->getDataLength();
 		prev = cursor->getPrevPosition();
 		next = cursor->getNextPosition();
-		if (!cursor->getRecordData(buffer, length)) {
+		if (!cursor->getRecordData(buffer)) {
 			std::unique_lock lock(outputLock);
 			std::cout << "Record corrupt at " << counter << " record (descending)\n";
 			result = false;
@@ -357,11 +360,11 @@ bool TestRecordFileIO::removeEvenRecords(bool verbose) {
 	bool result = true;
 
 	do {
-		if (!cursor->isValid()) {
+		/*if (!cursor->isValid()) {
 			std::unique_lock lock(outputLock);
 			std::cout << "Cursor invalidated at " << counter << " record\n";
 			break;
-		}
+		}*/
 		uint32_t length = cursor->getDataLength();
 		prev = cursor->getPrevPosition();
 		next = cursor->getNextPosition();
@@ -457,24 +460,24 @@ bool TestRecordFileIO::editRecords(bool verbose) {
 	bool result = true;
 
 	do {
-		if (!cursor->isValid()) {
+		/*if (!cursor->isValid()) {
 			cursor = db->getFirstRecord();
 			//break;
-		}
+		}*/
 		uint32_t length = cursor->getDataLength();
 		prev = cursor->getPrevPosition();
 		next = cursor->getNextPosition();
 
-		if (!cursor->getRecordData(buffer, length)) {
+		if (!cursor->getRecordData(buffer)) {
 			std::unique_lock lock(outputLock);
-			std::cerr << "Record corrupt at " << counter << " record\n";
+			std::cerr << "Record corrupt at " << counter << " record (edit)\n";
 			break;
 		}		
 		buffer[length] = 0;
 
 
 		std::stringstream entryStr;		
-		entryStr << "EDITED Thread=" << std::this_thread::get_id();
+		entryStr << buffer << "EDITED Thread=" << std::this_thread::get_id();
 		uint32_t entryStrLen = static_cast<uint32_t> (entryStr.str().length());
 		if (!cursor->setRecordData(entryStr.str().c_str(), entryStrLen)) {
 			std::unique_lock lock(outputLock);

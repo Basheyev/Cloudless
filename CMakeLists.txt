@@ -11,6 +11,10 @@ endif()
 
 project ("Cloudless")
 
+# Включаем отладочные символы в Release
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi")
+set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG")
+
 
 # Добавьте источник в исполняемый файл этого проекта.
 add_executable (

@@ -526,23 +526,21 @@ uint64_t RecordFileIO::writeRecordHeader(uint64_t offset, RecordHeader& header) 
 * @param[in]  length - bytes to read to the user buffer
 * @return returns record position if OK or NOT_FOUND if header or data corrupted
 */
-uint64_t RecordFileIO::readRecordData(uint64_t offset, void* data, uint32_t length) {
+uint64_t RecordFileIO::readRecordData(uint64_t offset, void* data) {
 	
-	if (offset == NOT_FOUND || data == nullptr || length == 0) {
-		std::cout << "Record data read (offset == NOT_FOUND || data == nullptr || length == 0)\n";
+	if (offset == NOT_FOUND || data == nullptr) {
+		std::cout << "Record data read (offset == NOT_FOUND || data == nullptr)\n";
 		return NOT_FOUND;
 	}
 
 	RecordHeader recordHeader;
-	uint64_t bytesToRead;
 	uint64_t dataOffset;
 	bool invalidated = false;
 	
 	lockRecord(offset, false);
 	if (readRecordHeader(offset, recordHeader) != NOT_FOUND) {
-		bytesToRead = std::min(recordHeader.dataLength, length);
 		dataOffset = offset + RECORD_HEADER_SIZE;
-		cachedFile.read(dataOffset, data, bytesToRead);
+		cachedFile.read(dataOffset, data, recordHeader.dataLength);
 	} else invalidated = true;
 	unlockRecord(offset, false);
 	
@@ -552,7 +550,7 @@ uint64_t RecordFileIO::readRecordData(uint64_t offset, void* data, uint32_t leng
 	}
 
 	// check data consistency by checksum
-	uint32_t dataCheckSum = checksum((uint8_t*)data, bytesToRead);
+	uint32_t dataCheckSum = checksum((uint8_t*)data, recordHeader.dataLength);
 	if (dataCheckSum != recordHeader.dataChecksum) {
 		std::cout << "Record data read failed \n";
 		return NOT_FOUND;
@@ -581,6 +579,7 @@ uint64_t RecordFileIO::writeRecordData(uint64_t offset, const void* data, uint32
 		
 	// exclusive lock record
 	lockRecord(offset, true);
+
 	// reads it header
 	uint64_t pos = readRecordHeader(offset, recordHeader);
 	// if header is corrupt or record deleted - return
@@ -604,7 +603,7 @@ uint64_t RecordFileIO::writeRecordData(uint64_t offset, const void* data, uint32
 		bytesWritten += cachedFile.write(offset + RECORD_HEADER_SIZE, data, length);
 		
 		unlockRecord(offset, true);
-		return offset; // bytesWritten == (RECORD_HEADER_SIZE + length);
+		return offset; 
 		
 	}
 
@@ -614,20 +613,57 @@ uint64_t RecordFileIO::writeRecordData(uint64_t offset, const void* data, uint32
 	RecordHeader newRecordHeader;
 	uint64_t newOffset;
 	{
-		// lock storage find free record of required length and write it
+		// Find free record of required length and write it
+		unlockRecord(offset, true);
 		newOffset = allocateRecord(length, newRecordHeader, data, length);
 		if (newOffset == NOT_FOUND) {
-			unlockRecord(offset, true);
+			// unlockRecord(offset, true);
 			return NOT_FOUND;
-		} else {
-			lockRecord(newOffset, true);
-		}
+		};		
 	}
-		
+
+	// BUG: consistency?
+	// TODO: Interconnect siblings! Check algorithm
+
+	// lock and update siblings
+	RecordHeader leftSiblingHeader;
+	RecordHeader rightSiblingHeader;
+	uint64_t leftSiblingOffset = recordHeader.previous;
+	uint64_t rightSiblingOffset = recordHeader.next;
+	
+	lockRecord(newOffset, true);
+
+	if (leftSiblingOffset != NOT_FOUND) {
+		lockRecord(leftSiblingOffset, true);
+		readRecordHeader(leftSiblingOffset, leftSiblingHeader);		
+		leftSiblingHeader.next = newOffset;
+		writeRecordHeader(leftSiblingOffset, leftSiblingHeader);
+		unlockRecord(leftSiblingOffset, true);
+	}
+	if (rightSiblingOffset != NOT_FOUND) {
+		lockRecord(rightSiblingOffset, true);
+		readRecordHeader(rightSiblingOffset, rightSiblingHeader);
+		rightSiblingHeader.previous = newOffset;
+		writeRecordHeader(rightSiblingOffset, rightSiblingHeader);
+		unlockRecord(rightSiblingOffset, true);
+	}
+	
+	newRecordHeader.previous = leftSiblingOffset;
+	newRecordHeader.next = rightSiblingOffset;
+	writeRecordHeader(newOffset, newRecordHeader);	
+	unlockRecord(newOffset, true);
+	
+	
 	// Update current record and position
 	memcpy(&recordHeader, &newRecordHeader, RECORD_HEADER_SIZE);
+
+	// unlock record
+	//unlockRecord(offset, true);
+
+	// Delete old record and add it to the free records list		
+	if (!addRecordToFreeList(offset)) return NOT_FOUND;
 	
-	return newOffset; // bytesWritten == (RECORD_HEADER_SIZE + length);
+	return newOffset; 
 	
 }
 
@@ -878,7 +914,10 @@ bool RecordFileIO::addRecordToFreeList(uint64_t offset) {
 	size_t previousFreeRecordOffset;
 	
 	lockRecord(offset, false);
-	if (readRecordHeader(offset, newFreeRecord) == NOT_FOUND) return false;
+	if (readRecordHeader(offset, newFreeRecord) == NOT_FOUND) {
+		unlockRecord(offset, false);
+		return false;
+	}
 	unlockRecord(offset, false);
 
 	// Check if already deleted

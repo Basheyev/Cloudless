@@ -133,7 +133,7 @@ namespace Cloudless {
 			
 			uint64_t readRecordHeader(uint64_t offset, RecordHeader& result);
 			uint64_t writeRecordHeader(uint64_t offset, RecordHeader& header);
-			uint64_t readRecordData(uint64_t offset, void* data, uint32_t length);
+			uint64_t readRecordData(uint64_t offset, void* data);
 			uint64_t writeRecordData(uint64_t offset, const void* data, uint32_t length);
 
 			uint64_t allocateRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length);
@@ -162,8 +162,8 @@ namespace Cloudless {
 			
 			RecordCursor(RecordFileIO& rf, RecordHeader& rh, uint64_t position);
 
-			bool getRecordData(void* data, uint32_t length);                 // maybe starting position required
-			bool setRecordData(const void* data, uint32_t length);           // maybe starting position required
+			bool getRecordData(void* data);
+			bool setRecordData(const void* data, uint32_t length);
 			bool isValid();
 			void invalidate();
 

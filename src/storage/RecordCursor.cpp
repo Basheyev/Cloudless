@@ -92,7 +92,7 @@ uint64_t RecordCursor::getPosition() {
 * @return true - if offset points to consistent record, false - otherwise
 */
 bool RecordCursor::setPosition(uint64_t offset) {
-
+	if (offset == NOT_FOUND) return false;
 	std::unique_lock lock(cursorMutex);
 	recordFile.lockRecord(offset, false);
 	uint64_t recPos = recordFile.readRecordHeader(offset, recordHeader);
@@ -122,12 +122,13 @@ bool RecordCursor::next() {
 		recordFile.unlockRecord(currentPosition, false);
 
 		nextPos = recordHeader.next;
+		if (nextPos == NOT_FOUND) return false;
 		{
 			// check if we reached the last record
-			std::shared_lock storageHeaderLock(recordFile.headerMutex);
-			if (currentPosition == recordFile.storageHeader.lastRecord) {
-				return false;
-			}
+			// std::shared_lock storageHeaderLock(recordFile.headerMutex);
+			// if (currentPosition == recordFile.storageHeader.lastRecord) {
+			//     return false;
+			// }
 		}
 	}
 	return setPosition(nextPos);
@@ -151,11 +152,12 @@ bool RecordCursor::previous() {
 		recordFile.unlockRecord(currentPosition, false);
 				
 		prevPos = recordHeader.previous;
-		{
-			// check if we reached the first record
-			std::shared_lock storageHeaderLock(recordFile.headerMutex);
-			if (currentPosition == recordFile.storageHeader.firstRecord) return false;
-		}
+		if (prevPos == NOT_FOUND) return false;
+		//{
+		//	// check if we reached the first record
+		//	std::shared_lock storageHeaderLock(recordFile.headerMutex);
+		//	if (currentPosition == recordFile.storageHeader.firstRecord) return false;
+		//}
 	}	
 	return setPosition(prevPos);
 }
@@ -213,10 +215,10 @@ uint64_t RecordCursor::getPrevPosition() {
 * @param[in]  length - bytes to read to the user buffer
 * @return returns true or false if data corrupted
 */
-bool RecordCursor::getRecordData(void* data, uint32_t length) {	
+bool RecordCursor::getRecordData(void* data) {	
 	// Lock cursor for reading
 	std::shared_lock lock(cursorMutex);
-	return recordFile.readRecordData(currentPosition, data, length) != NOT_FOUND;
+	return recordFile.readRecordData(currentPosition, data) != NOT_FOUND;
 }
 
 
@@ -232,6 +234,12 @@ bool RecordCursor::getRecordData(void* data, uint32_t length) {
 bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 	// Lock cursor for changes
 	std::unique_lock lockCursor(cursorMutex);	
-	return recordFile.writeRecordData(currentPosition, data, length) != NOT_FOUND;
+	uint64_t result = recordFile.writeRecordData(currentPosition, data, length);
+	if (result == NOT_FOUND) return false;
+	if (currentPosition != result) {
+		lockCursor.unlock();
+		return setPosition(result);
+	}
+	return true;
 }
 
