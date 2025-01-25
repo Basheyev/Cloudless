@@ -235,10 +235,13 @@ bool RecordCursor::setRecordData(const void* data, uint32_t length) {
 	// Lock cursor for changes
 	std::unique_lock lockCursor(cursorMutex);	
 	uint64_t result = recordFile.writeRecordData(currentPosition, data, length);
-	if (result == NOT_FOUND) return false;
+	if (result == NOT_FOUND) {
+		return false;
+	}
 	if (currentPosition != result) {
 		lockCursor.unlock();
-		return setPosition(result);
+		bool success = setPosition(result);
+		return success;
 	}
 	return true;
 }

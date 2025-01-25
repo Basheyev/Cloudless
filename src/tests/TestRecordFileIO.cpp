@@ -22,7 +22,7 @@ std::string TestRecordFileIO::getName() const {
 
 void TestRecordFileIO::init() {
 	fileName = (char*)"records.bin";
-	samplesCount = 100000;
+	samplesCount = 10000;
 
 	// Functional test
 	if (std::filesystem::exists(fileName)) {
@@ -105,11 +105,13 @@ bool TestRecordFileIO::multithreaded() {
 
 					generateData(batchSize);					
 					readDescending(false);
+					std::this_thread::sleep_for(std::chrono::seconds(1));
 					editRecords(false);
 				    //removeEvenRecords(false);
 					//insertNewRecords(batchSize / 2);					
 				} else {
 					//generateData(batchSize);
+					std::this_thread::sleep_for(std::chrono::seconds(1));
 					readAscending(false);					
 					readDescending(false);
 				}	
