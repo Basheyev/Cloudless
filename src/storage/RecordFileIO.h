@@ -88,7 +88,16 @@ namespace Cloudless {
 			std::shared_mutex     mutex;
 			std::atomic<int32_t>  counter;						
 		};
-				
+
+		//----------------------------------------------------------------------------
+		// Record file IO error codes
+		//----------------------------------------------------------------------------
+		enum class RecordErrorCode : uint32_t {
+			SUCCESS = 0,
+			CANT_OPEN_FILE = 1,
+			STORAGE_HEADER_CORRUPT = 2
+		};
+
 		//----------------------------------------------------------------------------
 		// RecordFileIO
 		//----------------------------------------------------------------------------
@@ -116,12 +125,21 @@ namespace Cloudless {
 			std::shared_ptr<RecordCursor> getLastRecord();
 			bool removeRecord(std::shared_ptr<RecordCursor> cursor);
 
+			void resetErrorCode();			
+			RecordErrorCode getErrorCode();
+			void setErrorCode(RecordErrorCode code);
+			
+			void   resetCacheStats();
+			double getCacheStats(CachedFileStats type);
+
 		protected:
 
 			std::shared_mutex storageMutex;			
 			std::shared_mutex headerMutex;
-			std::shared_mutex mapMutex;
+			std::shared_mutex recordLocksMutex;
+			std::shared_mutex errorCodesMutex;
 			std::unordered_map<uint64_t, std::shared_ptr<RecordLock>> recordLocks;
+			std::unordered_map<std::thread::id, RecordErrorCode> errorCodes;
 						
 			CachedFileIO  cachedFile;
 			StorageHeader storageHeader;
@@ -135,17 +153,16 @@ namespace Cloudless {
 			uint64_t writeRecordHeader(uint64_t offset, RecordHeader& header);
 			uint64_t readRecordData(uint64_t offset, void* data);
 			uint64_t writeRecordData(uint64_t offset, const void* data, uint32_t length);
+			uint32_t checksum(const uint8_t* data, uint64_t length);
 
 			uint64_t allocateRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool updateHeader);
 			uint64_t createFirstRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length);
 			uint64_t appendNewRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool updateHeader);
+			
 			uint64_t getFromFreeList(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool updateHeader);
-
 			bool     addRecordToFreeList(uint64_t offset);
 			void     removeRecordFromFreeList(RecordHeader& freeRecord);
-
-			uint32_t checksum(const uint8_t* data, uint64_t length);
-
+			
 			void     lockRecord(uint64_t offset, bool exclusive);
 			void     unlockRecord(uint64_t offset, bool exclusive);
 			

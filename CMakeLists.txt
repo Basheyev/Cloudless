@@ -36,7 +36,7 @@ add_executable (
     "src/storage/RecordFileIO.h"
 
  
- "src/storage/BinaryDirectIO.cpp" )
+ "src/storage/BinaryDirectIO.cpp"  "src/storage/RecordFileIO_allocator.cpp" "src/storage/RecordFileIO_readwrite.cpp" "src/storage/RecordFileIO_freelist.cpp" "src/storage/RecordFileIO_locks.cpp" "src/storage/RecordFileIO_header.cpp")
 
 
 add_executable (
@@ -61,7 +61,7 @@ add_executable (
     "src/tests/TestRecordFileIO.cpp"
     "src/tests/TestRecordFileIO.h"
     
-   "src/storage/BinaryDirectIO.cpp" )
+   "src/storage/BinaryDirectIO.cpp"  "src/storage/RecordFileIO_allocator.cpp" "src/storage/RecordFileIO_readwrite.cpp" "src/storage/RecordFileIO_freelist.cpp" "src/storage/RecordFileIO_locks.cpp" "src/storage/RecordFileIO_header.cpp")
 
 
 target_compile_definitions(Cloudless PRIVATE NO_SSL)
