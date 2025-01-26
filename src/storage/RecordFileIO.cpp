@@ -40,7 +40,10 @@ RecordFileIO::RecordFileIO() : storageHeader{} {
 */
 RecordFileIO::~RecordFileIO() {
 	if (!cachedFile.isOpen()) return;
-	writeStorageHeader();	
+	{
+		std::unique_lock lock(headerMutex);
+		writeStorageHeader();
+	}
 	flush();
 	close();
 }
@@ -63,13 +66,17 @@ bool RecordFileIO::open(const char* path, bool isReadOnly, size_t cacheSize) {
 
 	// If file is empty and write is permitted, then write initial storage header
 	if (cachedFile.getFileSize() == 0 && !cachedFile.isReadOnly()) {
+		std::unique_lock lock(headerMutex);
 		createStorageHeader();
 	}
 
 	// Try to load storage header
-	if (!loadStorageHeader()) {
-		const char* msg = "Storage file header is invalid or corrupt.\n";
-		throw std::runtime_error(msg);
+	{
+		std::unique_lock lock(headerMutex);
+		if (!loadStorageHeader()) {
+			const char* msg = "Storage file header is invalid or corrupt.\n";
+			throw std::runtime_error(msg);
+		}
 	}
 
 	return true;
@@ -328,8 +335,8 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 			// update header
 			std::unique_lock lockHeader(headerMutex);
 			storageHeader.totalRecords--;
-		}
-		writeStorageHeader();
+			writeStorageHeader();		}
+		
 	} else if (leftSiblingExists) {		             
 		// removing last record
 		lockRecord(leftSiblingOffset, true);		
@@ -344,8 +351,8 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 			std::unique_lock lockHeader(headerMutex);
 			storageHeader.lastRecord = leftSiblingOffset;
 			storageHeader.totalRecords--;
-		}
-		writeStorageHeader();
+			writeStorageHeader();
+		}		
 		newCursorPosition = leftSiblingOffset;
 		newCursorRecordHeader = &leftSiblingHeader;
 	} else if (rightSiblingExists) {		         				
@@ -362,8 +369,8 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 			std::unique_lock lockHeader(headerMutex);
 			storageHeader.firstRecord = rightSiblingOffset;
 			storageHeader.totalRecords--;
-		}
-		writeStorageHeader();
+			writeStorageHeader();
+		}		
 		newCursorPosition = rightSiblingOffset;
 		newCursorRecordHeader = &rightSiblingHeader;
 	} else {                         
@@ -375,8 +382,8 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 			storageHeader.firstRecord = NOT_FOUND;
 			storageHeader.lastRecord = NOT_FOUND;
 			storageHeader.totalRecords--;
-		}
-		writeStorageHeader();
+			writeStorageHeader();
+		}		
 		newCursorPosition = NOT_FOUND;
 		newCursorRecordHeader = nullptr;
 	}
@@ -390,7 +397,6 @@ bool RecordFileIO::removeRecord(std::shared_ptr<RecordCursor> cursor) {
 	else {
 		// invalidate cursor if there is no neighbour records
 		cursor->currentPosition = NOT_FOUND;
-
 		cursor->recordHeader.next = NOT_FOUND;
 		cursor->recordHeader.previous = NOT_FOUND;
 		cursor->recordHeader.dataLength = 0;

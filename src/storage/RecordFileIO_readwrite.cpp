@@ -4,6 +4,19 @@
 
 using namespace Cloudless::Storage;
 
+
+/*
+
+BUG:
+
+EDIT ASCENDING CYCLIC REFERENCE!!! counter 15001 is more than Total=5000
+Record=5496850 prev=5496309 next=5183472
+
+EDIT ASCENDING CYCLIC REFERENCE!!! counter 15001 is more than Total=5000
+Record=9217907 prev=9216796 next=8944398
+
+*/
+
 //-----------------------------------------------------------------------------
 // Records read/write methods
 //-----------------------------------------------------------------------------
@@ -59,7 +72,7 @@ uint64_t RecordFileIO::writeRecordHeader(uint64_t offset, RecordHeader& header) 
 uint64_t RecordFileIO::readRecordData(uint64_t offset, void* data) {
 
 	if (offset == NOT_FOUND || data == nullptr) {
-		std::cout << "Record data read (offset == NOT_FOUND || data == nullptr)\n";
+		std::cerr << "Record data read (offset == NOT_FOUND || data == nullptr)\n";
 		return NOT_FOUND;
 	}
 
@@ -71,19 +84,18 @@ uint64_t RecordFileIO::readRecordData(uint64_t offset, void* data) {
 	if (readRecordHeader(offset, recordHeader) != NOT_FOUND) {
 		dataOffset = offset + RECORD_HEADER_SIZE;
 		cachedFile.read(dataOffset, data, recordHeader.dataLength);
-	}
-	else invalidated = true;
+	} else invalidated = true;
 	unlockRecord(offset, false);
 
 	if (invalidated) {
-		std::cout << "Record header read failed \n";
+		std::cerr << "Record header read failed at pos=" << offset << "\n";
 		return NOT_FOUND;
 	}
 
 	// check data consistency by checksum
 	uint32_t dataCheckSum = checksum((uint8_t*)data, recordHeader.dataLength);
 	if (dataCheckSum != recordHeader.dataChecksum) {
-		std::cout << "Record data read failed \n";
+		std::cerr << "Record data read failed at pos=" << offset << "\n";
 		return NOT_FOUND;
 	}
 
@@ -137,24 +149,25 @@ uint64_t RecordFileIO::writeRecordData(uint64_t offset, const void* data, uint32
 		return offset;
 
 	}
-
+	
 	//------------------------------------------------------------------	
 	// if there is not enough record capacity, then move record	
 	//------------------------------------------------------------------	
 	RecordHeader newRecordHeader;
 	uint64_t newOffset;
-	{
-		// Find free record of required length and write it
-		unlockRecord(offset, true);
-		newOffset = allocateRecord(length, newRecordHeader, data, length, false);
-		if (newOffset == NOT_FOUND) {
-			// unlockRecord(offset, true);
-			return NOT_FOUND;
-		};
-	}
+	
+	// Copy record header
+	memcpy(&newRecordHeader, &recordHeader,  RECORD_HEADER_SIZE);	
+	// Find free record of required length and write it
+	newOffset = allocateRecord(length, newRecordHeader, data, length, false);
+	if (newOffset == NOT_FOUND) return NOT_FOUND;		
+	// Lock new location
+	lockRecord(newOffset, true);
 
-	// BUG: consistency?
-	// TODO: Interconnect siblings! Check algorithm
+	// Unlock previous location
+	unlockRecord(offset, true);
+	// Delete old record and add it to the free records list	
+	if (!addRecordToFreeList(offset)) return NOT_FOUND;
 
 	// lock and update siblings
 	RecordHeader leftSiblingHeader;
@@ -162,8 +175,7 @@ uint64_t RecordFileIO::writeRecordData(uint64_t offset, const void* data, uint32
 	uint64_t leftSiblingOffset = recordHeader.previous;
 	uint64_t rightSiblingOffset = recordHeader.next;
 
-	lockRecord(newOffset, true);
-
+	// interconnect with left sibling if exists
 	if (leftSiblingOffset != NOT_FOUND) {
 		lockRecord(leftSiblingOffset, true);
 		readRecordHeader(leftSiblingOffset, leftSiblingHeader);
@@ -171,6 +183,8 @@ uint64_t RecordFileIO::writeRecordData(uint64_t offset, const void* data, uint32
 		writeRecordHeader(leftSiblingOffset, leftSiblingHeader);
 		unlockRecord(leftSiblingOffset, true);
 	}
+
+	// interconnect with right sibling if exists
 	if (rightSiblingOffset != NOT_FOUND) {
 		lockRecord(rightSiblingOffset, true);
 		readRecordHeader(rightSiblingOffset, rightSiblingHeader);
@@ -184,15 +198,8 @@ uint64_t RecordFileIO::writeRecordData(uint64_t offset, const void* data, uint32
 	writeRecordHeader(newOffset, newRecordHeader);
 	unlockRecord(newOffset, true);
 
-
 	// Update current record and position
 	memcpy(&recordHeader, &newRecordHeader, RECORD_HEADER_SIZE);
-
-	// unlock record
-	//unlockRecord(offset, true);
-
-	// Delete old record and add it to the free records list		
-	if (!addRecordToFreeList(offset)) return NOT_FOUND;
 
 	return newOffset;
 

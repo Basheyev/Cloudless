@@ -15,9 +15,10 @@ using namespace Cloudless::Storage;
 *  @param[out] result  - record header of created new record
 *  @param[in] data     - record data
 *  @param[in] length   - record data length
+*  @param[in] createNewRecord - true if creating new record, false if moving old record
 *  @return offset of record in the storage file
 */
-uint64_t RecordFileIO::allocateRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool updateHeader) {
+uint64_t RecordFileIO::allocateRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool createNewRecord) {
 
 	bool noFreeRecords;
 	{
@@ -27,18 +28,18 @@ uint64_t RecordFileIO::allocateRecord(uint32_t capacity, RecordHeader& result, c
 
 	// if there is no free records yet
 	if (noFreeRecords) {
-		// if there is no records at all create first record
+		// if there is no records at all - create first record
 		return createFirstRecord(capacity, result, data, length);
-	}
-	else {
+	} else {
 		// look up free list for record of suitable capacity
-		uint64_t offset = getFromFreeList(capacity, result, data, length, updateHeader);
+		uint64_t offset = getFromFreeList(capacity, result, data, length, createNewRecord);
 		// if found, then just return it
 		if (offset != NOT_FOUND) return offset;
+		// otherwise append new record
 	}
 
 	// if there is no free records, append to the end of file	
-	return appendNewRecord(capacity, result, data, length, updateHeader);
+	return appendNewRecord(capacity, result, data, length, createNewRecord);
 
 }
 
@@ -76,10 +77,12 @@ uint64_t RecordFileIO::createFirstRecord(uint32_t capacity, RecordHeader& result
 		cachedFile.write(offset, &result, RECORD_HEADER_SIZE);
 		cachedFile.write(offset + RECORD_HEADER_SIZE, data, length);
 		unlockRecord(offset, true);
+
+		// Write record header and data to the storage file		
+		writeStorageHeader();
 	}
 
-	// Write record header and data to the storage file		
-	writeStorageHeader();
+	
 
 	return offset;
 }
@@ -93,7 +96,7 @@ uint64_t RecordFileIO::createFirstRecord(uint32_t capacity, RecordHeader& result
 *  @param[out] result  - record header of created new record
 *  @return offset of record in the storage file
 */
-uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool updateHeader) {
+uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool createNewRecord) {
 
 	if (capacity == 0) return NOT_FOUND;
 
@@ -102,8 +105,7 @@ uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result, 
 	uint64_t freeRecordOffset;
 	uint64_t lastRecordOffset;
 
-	// fill record header
-	result.next = NOT_FOUND;
+	// fill record header	
 	result.recordCapacity = capacity;
 	result.bitFlags = 0;
 	result.dataLength = length;
@@ -111,18 +113,18 @@ uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result, 
 
 	// add record to the end of data and update storage header
 	{
-		std::unique_lock lock(headerMutex);
-		lastRecordOffset = storageHeader.lastRecord;
+		std::unique_lock lock(headerMutex);		
 		freeRecordOffset = storageHeader.endOfData;
 		storageHeader.endOfData = freeRecordOffset + RECORD_HEADER_SIZE + capacity;
 
-		if (updateHeader) {
+		if (createNewRecord) {
+			lastRecordOffset = storageHeader.lastRecord;
 			storageHeader.lastRecord = freeRecordOffset;
 			storageHeader.totalRecords++;
 
-			// connect to previous record
-			result.previous = lastRecordOffset;
-			result.headChecksum = checksum((uint8_t*)&result, RECORD_HEADER_PAYLOAD_SIZE);
+			// connect to previous record		
+			result.previous = lastRecordOffset;			
+			result.next = NOT_FOUND;
 
 			// update last record and connect to new record
 			lockRecord(lastRecordOffset, true);
@@ -130,16 +132,18 @@ uint64_t RecordFileIO::appendNewRecord(uint32_t capacity, RecordHeader& result, 
 			lastRecord.next = freeRecordOffset;
 			writeRecordHeader(lastRecordOffset, lastRecord);
 			unlockRecord(lastRecordOffset, true);
+
 		}
 
 		// write data of new appended record
+		result.headChecksum = checksum((uint8_t*)&result, RECORD_HEADER_PAYLOAD_SIZE);
 		lockRecord(freeRecordOffset, true);
 		cachedFile.write(freeRecordOffset, &result, RECORD_HEADER_SIZE);
 		cachedFile.write(freeRecordOffset + RECORD_HEADER_SIZE, data, length);
 		unlockRecord(freeRecordOffset, true);
 
+		writeStorageHeader();
 	}
-	writeStorageHeader();
 
 	return freeRecordOffset;
 }

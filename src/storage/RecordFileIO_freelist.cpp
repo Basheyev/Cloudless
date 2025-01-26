@@ -16,7 +16,7 @@ using namespace Cloudless::Storage;
 *  @param[out] result  - record header of created new record
 *  @return offset of record in the storage file
 */
-uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool updateHeader) {
+uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool createNewRecord) {
 
 	RecordHeader freeRecord{ 0 };
 	uint64_t previousRecordPos;
@@ -26,22 +26,24 @@ uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result, 
 		std::shared_lock lock(headerMutex);
 		if (storageHeader.totalFreeRecords == 0) return NOT_FOUND;
 		// Read storage last record position before it will be changed by free list
-
 		freeRecord.next = storageHeader.firstFreeRecord;
 		freeRecordOffset = freeRecord.next;
 	}
 
 	uint64_t maximumIterations = freeLookupDepth.load();
 	uint64_t iterationCounter = 0;
+
 	// iterate through free list and check iterations counter
 	while (freeRecord.next != NOT_FOUND && iterationCounter < maximumIterations) {
 
 		// Read next free record header
-		lockRecord(freeRecordOffset, false);
+		lockRecord(freeRecordOffset, true);
 		readRecordHeader(freeRecordOffset, freeRecord);
 
 		// if record with requested capacity found
 		if (freeRecord.recordCapacity >= capacity && (freeRecord.bitFlags & RECORD_DELETED_FLAG)) {
+			// Synchronize all modification in free list
+			std::unique_lock freeLock(freeListMutex);
 
 			// Remove free record from the free list
 			removeRecordFromFreeList(freeRecord);
@@ -49,8 +51,7 @@ uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result, 
 			// update last record to point to new record
 			RecordHeader previousRecord;
 
-			// connect new record with previous
-			result.next = NOT_FOUND;
+			// connect new record with previous			
 			result.recordCapacity = freeRecord.recordCapacity;
 			result.dataLength = length;
 			result.dataChecksum = checksum((uint8_t*)data, length);
@@ -58,45 +59,39 @@ uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result, 
 			result.bitFlags = freeRecord.bitFlags & (~RECORD_DELETED_FLAG);
 
 			// update storage header last record to new record
-			{
-				// std::unique_lock lock(headerMutex);
+			if (createNewRecord) {
+				std::shared_lock lock(headerMutex);
+				// connect to previous record
+				previousRecordPos = storageHeader.lastRecord;
 
-				if (updateHeader) {
-					std::unique_lock lock(headerMutex);
-					// connect to previous record
-					previousRecordPos = storageHeader.lastRecord;
-					result.previous = previousRecordPos;
-					result.headChecksum = checksum((uint8_t*)&result, RECORD_HEADER_PAYLOAD_SIZE);
+				result.next = NOT_FOUND;
+				result.previous = previousRecordPos;					
 
-					lockRecord(previousRecordPos, true);
-					readRecordHeader(previousRecordPos, previousRecord);
-					previousRecord.next = freeRecordOffset;
-					writeRecordHeader(previousRecordPos, previousRecord);
-					unlockRecord(previousRecordPos, true);
-				}
-
-				// unlock shared lock
-				unlockRecord(freeRecordOffset, false);
-
-				// write data of new appended record				
-				lockRecord(freeRecordOffset, true);
-				cachedFile.write(freeRecordOffset, &result, RECORD_HEADER_SIZE);
-				cachedFile.write(freeRecordOffset + RECORD_HEADER_SIZE, data, length);
-				unlockRecord(freeRecordOffset, true);
-
-				if (updateHeader) {
-					std::unique_lock lock(headerMutex);
-					storageHeader.lastRecord = freeRecordOffset;
-					storageHeader.totalRecords++;
-				}
+				lockRecord(previousRecordPos, true);
+				readRecordHeader(previousRecordPos, previousRecord);
+				previousRecord.next = freeRecordOffset;
+				writeRecordHeader(previousRecordPos, previousRecord);
+				unlockRecord(previousRecordPos, true);
 			}
 
-			writeStorageHeader();
+			// Update record
+			result.headChecksum = checksum((uint8_t*)&result, RECORD_HEADER_PAYLOAD_SIZE);
+			cachedFile.write(freeRecordOffset, &result, RECORD_HEADER_SIZE);
+			cachedFile.write(freeRecordOffset + RECORD_HEADER_SIZE, data, length);
+			unlockRecord(freeRecordOffset, true);
+
+			// Update storage header
+			if (createNewRecord) {
+				std::unique_lock lock(headerMutex);
+				storageHeader.lastRecord = freeRecordOffset;
+				storageHeader.totalRecords++;
+				writeStorageHeader();
+			}
 
 			return freeRecordOffset;
 		}
 
-		unlockRecord(freeRecordOffset, false);
+		unlockRecord(freeRecordOffset, true);
 		freeRecordOffset = freeRecord.next;
 
 		iterationCounter++;
@@ -137,12 +132,16 @@ bool RecordFileIO::addRecordToFreeList(uint64_t offset) {
 		// save it as last added free record
 		storageHeader.lastFreeRecord = offset;
 		storageHeader.totalFreeRecords++;
+		// save storage header
+		writeStorageHeader();
 	}
-	// save storage header
-	writeStorageHeader();
+	
 
 	// if free records list is not empty
 	if (previousFreeRecordOffset != NOT_FOUND) {
+		// Synchronize all modification in free list
+		std::unique_lock freeLock(freeListMutex);
+
 		// load previous last record
 		lockRecord(previousFreeRecordOffset, true);
 		readRecordHeader(previousFreeRecordOffset, previousFreeRecord);
@@ -206,9 +205,10 @@ void RecordFileIO::removeRecordFromFreeList(RecordHeader& freeRecord) {
 		unlockRecord(leftSiblingOffset, true);
 		unlockRecord(rightSiblingOffset, true);
 		{
-			headerMutex.lock();
-			storageHeader.totalFreeRecords--;
-			headerMutex.unlock();
+			std::unique_lock lock(headerMutex);
+			storageHeader.totalFreeRecords--;			
+			// Persist storage header
+			writeStorageHeader();
 		}
 	}   // if left sibling exists and right is not
 	else if (leftSiblingExists) {
@@ -219,10 +219,11 @@ void RecordFileIO::removeRecordFromFreeList(RecordHeader& freeRecord) {
 		writeRecordHeader(leftSiblingOffset, leftSiblingHeader);
 		unlockRecord(leftSiblingOffset, true);
 		{
-			headerMutex.lock();
+			std::unique_lock lock(headerMutex);
 			storageHeader.lastFreeRecord = leftSiblingOffset;
 			storageHeader.totalFreeRecords--;
-			headerMutex.unlock();
+			// Persist storage header
+			writeStorageHeader();			
 		}
 	}   // if right sibling exists and left is not
 	else if (rightSiblingExists) {
@@ -233,21 +234,21 @@ void RecordFileIO::removeRecordFromFreeList(RecordHeader& freeRecord) {
 		writeRecordHeader(rightSiblingOffset, rightSiblingHeader);
 		unlockRecord(rightSiblingOffset, true);
 		{
-			headerMutex.lock();
+			std::unique_lock lock(headerMutex);
 			storageHeader.firstFreeRecord = rightSiblingOffset;
 			storageHeader.totalFreeRecords--;
-			headerMutex.unlock();
+			// Persist storage header
+			writeStorageHeader();			
 		}
-	}
-	else {
-		headerMutex.lock();
+	} else {
+		std::unique_lock lock(headerMutex);
 		// If removing last free record
 		storageHeader.firstFreeRecord = NOT_FOUND;
 		storageHeader.lastFreeRecord = NOT_FOUND;
 		storageHeader.totalFreeRecords--;
-		headerMutex.unlock();
+		// Persist storage header
+		writeStorageHeader();		
 	}
 
-	// Persist storage header
-	writeStorageHeader();
+	
 }

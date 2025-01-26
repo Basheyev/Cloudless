@@ -136,6 +136,7 @@ namespace Cloudless {
 
 			std::shared_mutex storageMutex;			
 			std::shared_mutex headerMutex;
+			std::shared_mutex freeListMutex;
 			std::shared_mutex recordLocksMutex;
 			std::shared_mutex errorCodesMutex;
 			std::unordered_map<uint64_t, std::shared_ptr<RecordLock>> recordLocks;
@@ -155,11 +156,11 @@ namespace Cloudless {
 			uint64_t writeRecordData(uint64_t offset, const void* data, uint32_t length);
 			uint32_t checksum(const uint8_t* data, uint64_t length);
 
-			uint64_t allocateRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool updateHeader);
+			uint64_t allocateRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool createNewRecord);
 			uint64_t createFirstRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length);
-			uint64_t appendNewRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool updateHeader);
+			uint64_t appendNewRecord(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool createNewRecord);
 			
-			uint64_t getFromFreeList(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool updateHeader);
+			uint64_t getFromFreeList(uint32_t capacity, RecordHeader& result, const void* data, uint32_t length, bool createNewRecord);
 			bool     addRecordToFreeList(uint64_t offset);
 			void     removeRecordFromFreeList(RecordHeader& freeRecord);
 			

@@ -7,44 +7,40 @@ using namespace Cloudless::Storage;
 //-----------------------------------------------------------------------------
 
 /*
-* @brief Initialize in memory storage header for new database
+* @brief Initialize in memory storage header for new database (not synchronized)
 */
 void RecordFileIO::createStorageHeader() {
-	{
-		std::unique_lock lock(headerMutex);
 
-		storageHeader.signature = KNOWLEDGE_SIGNATURE;
-		storageHeader.version = KNOWLEDGE_VERSION;
-		storageHeader.endOfData = STORAGE_HEADER_SIZE;
+	storageHeader.signature = KNOWLEDGE_SIGNATURE;
+	storageHeader.version = KNOWLEDGE_VERSION;
+	storageHeader.endOfData = STORAGE_HEADER_SIZE;
 
-		storageHeader.totalRecords = 0;
-		storageHeader.firstRecord = NOT_FOUND;
-		storageHeader.lastRecord = NOT_FOUND;
+	storageHeader.totalRecords = 0;
+	storageHeader.firstRecord = NOT_FOUND;
+	storageHeader.lastRecord = NOT_FOUND;
 
-		storageHeader.totalFreeRecords = 0;
-		storageHeader.firstFreeRecord = NOT_FOUND;
-		storageHeader.lastFreeRecord = NOT_FOUND;
-	}
+	storageHeader.totalFreeRecords = 0;
+	storageHeader.firstFreeRecord = NOT_FOUND;
+	storageHeader.lastFreeRecord = NOT_FOUND;
+	
 	writeStorageHeader();
 }
 
 
 
 /*
-*  @brief Saves in memory storage header to the file storage
+*  @brief Saves in memory storage header to the file storage (not synchronized)
 *  @return true - if succeeded, false - if failed
 */
 bool RecordFileIO::writeStorageHeader() {
 
 	uint64_t bytesWritten;
 	size_t ratioValue;
-	{
-		// write header to the storage
-		std::shared_lock lock(headerMutex);
-		bytesWritten = cachedFile.write(0, &storageHeader, STORAGE_HEADER_SIZE);
-		if (bytesWritten != STORAGE_HEADER_SIZE) return false;
-		ratioValue = storageHeader.totalFreeRecords / FREE_RECORD_LOOKUP_RATIO;
-	}
+
+	bytesWritten = cachedFile.write(0, &storageHeader, STORAGE_HEADER_SIZE);
+	if (bytesWritten != STORAGE_HEADER_SIZE) return false;
+	ratioValue = storageHeader.totalFreeRecords / FREE_RECORD_LOOKUP_RATIO;
+
 	// adjust free page lookup depth	
 	size_t value = std::max(FREE_RECORD_LOOKUP_DEPTH, ratioValue);
 	freeLookupDepth.store(value);
@@ -54,7 +50,7 @@ bool RecordFileIO::writeStorageHeader() {
 
 
 /*
-*  @brief Loads file storage header to memory storage header
+*  @brief Loads file storage header to memory storage header (not synchronized)
 *  @return true - if succeeded, false - if failed
 */
 bool RecordFileIO::loadStorageHeader() {
@@ -73,10 +69,7 @@ bool RecordFileIO::loadStorageHeader() {
 	size_t value = std::max(FREE_RECORD_LOOKUP_DEPTH, ratioValue);
 	freeLookupDepth.store(value);
 
-	{
-		std::unique_lock lock(headerMutex);
-		memcpy(&storageHeader, &sh, STORAGE_HEADER_SIZE);
-	}
+	memcpy(&storageHeader, &sh, STORAGE_HEADER_SIZE);
 
 	return true;
 }
