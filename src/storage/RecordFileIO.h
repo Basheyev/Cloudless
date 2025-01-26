@@ -164,8 +164,7 @@ namespace Cloudless {
 
 			bool getRecordData(void* data);
 			bool setRecordData(const void* data, uint32_t length);
-			bool isValid();
-			void invalidate();
+			bool isValid();			
 
 			uint64_t getPosition();
 			uint32_t getDataLength();
@@ -178,13 +177,13 @@ namespace Cloudless {
 
 		protected:
 
-			std::shared_mutex cursorMutex;
 			RecordFileIO& recordFile;
-			RecordHeader  recordHeader;
-			size_t        currentPosition;
-
+			RecordHeader recordHeader;			
+			std::atomic<uint64_t> currentPosition;
+			std::shared_mutex cursorMutex;
 
 			bool setPosition(uint64_t);
+			void invalidate();
 		};
 
 	}
