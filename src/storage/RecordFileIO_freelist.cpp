@@ -22,6 +22,9 @@ uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result, 
 	uint64_t previousRecordPos;
 	uint64_t freeRecordOffset;
 
+	// Synchronize all modification in free list
+	std::unique_lock freeLock(freeListMutex);
+
 	{
 		std::shared_lock lock(headerMutex);
 		if (storageHeader.totalFreeRecords == 0) return NOT_FOUND;
@@ -42,8 +45,6 @@ uint64_t RecordFileIO::getFromFreeList(uint32_t capacity, RecordHeader& result, 
 
 		// if record with requested capacity found
 		if (freeRecord.recordCapacity >= capacity && (freeRecord.bitFlags & RECORD_DELETED_FLAG)) {
-			// Synchronize all modification in free list
-			std::unique_lock freeLock(freeListMutex);
 
 			// Remove free record from the free list
 			removeRecordFromFreeList(freeRecord);
@@ -140,7 +141,7 @@ bool RecordFileIO::addRecordToFreeList(uint64_t offset) {
 	// if free records list is not empty
 	if (previousFreeRecordOffset != NOT_FOUND) {
 		// Synchronize all modification in free list
-		std::unique_lock freeLock(freeListMutex);
+		//std::unique_lock freeLock(freeListMutex);
 
 		// load previous last record
 		lockRecord(previousFreeRecordOffset, true);

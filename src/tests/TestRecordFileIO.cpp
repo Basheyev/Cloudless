@@ -41,7 +41,7 @@ void TestRecordFileIO::init() {
 void TestRecordFileIO::execute() {
 		
 
-//	singlethreaded();
+	singlethreaded();
 	multithreaded();
 
 	std::stringstream ss;
